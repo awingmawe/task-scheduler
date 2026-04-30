@@ -15,8 +15,8 @@ import json
 import os
 from google_auth_oauthlib.flow import InstalledAppFlow
 
-# Scope minimal: hanya bisa buat/edit events di calendar
-SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
+# Scope lengkap: bisa baca kalender list DAN buat/edit events
+SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 CREDENTIALS_FILE = os.path.join(
     os.path.dirname(__file__),

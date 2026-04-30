@@ -212,7 +212,7 @@ def _build_gcal_service():
         client_id=os.environ["GCAL_CLIENT_ID"],
         client_secret=os.environ["GCAL_CLIENT_SECRET"],
         token_uri="https://oauth2.googleapis.com/token",
-        scopes=["https://www.googleapis.com/auth/calendar.events"]
+        scopes=["https://www.googleapis.com/auth/calendar"]
     )
     # Wajib: force refresh token sebelum dipakai
     # Tanpa ini, 'token=None' bisa menyebabkan API call diam-diam gagal
@@ -232,10 +232,8 @@ def create_google_calendar_event(
     title: nama event.
     date_str: tanggal format YYYY-MM-DD. Kosong = hari ini.
     start_time: jam mulai format HH:MM (24 jam). Wajib diisi.
-    end_time: jam selesai format HH:MM (24 jam). UTAMAKAN INI jika user menyebut jam akhir
-              (contoh: 'jam 14 sampai jam 17' → end_time='17:00').
-    duration_minutes: durasi dalam menit. Dipakai jika end_time kosong (default 60 menit).
-    description: deskripsi tambahan (boleh kosong).
+    end_time: jam selesai format HH:MM (24 jam). UTAMAKAN INI jika user menyebut jam akhir.
+    duration_minutes: durasi dalam menit. Dipakai jika end_time kosong.
     """
     if not date_str:
         date_str = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -247,10 +245,9 @@ def create_google_calendar_event(
 
         start_dt = datetime.datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M")
 
-        # end_time lebih presisi dari duration_minutes — utamakan jika ada
         if end_time:
             end_dt = datetime.datetime.strptime(f"{date_str} {end_time}", "%Y-%m-%d %H:%M")
-            if end_dt <= start_dt:  # end_time melewati tengah malam
+            if end_dt <= start_dt:
                 end_dt += datetime.timedelta(days=1)
         else:
             end_dt = start_dt + datetime.timedelta(minutes=duration_minutes)
@@ -262,24 +259,49 @@ def create_google_calendar_event(
             "end":   {"dateTime": end_dt.isoformat(),   "timeZone": tz},
             "reminders": {
                 "useDefault": False,
-                "overrides": [
-                    {"method": "popup", "minutes": 15}
-                ]
+                "overrides": [{"method": "popup", "minutes": 15}]
             }
         }
 
+        print(f"[GCAL DEBUG] Creating event in calendar: {calendar_id}")
         created = service.events().insert(calendarId=calendar_id, body=event).execute()
         event_id = created.get("id", "?")
         link = created.get("htmlLink", "")
-        print(f"[GCAL] Event created: id={event_id}, {start_dt} - {end_dt}")
+        
+        # Log untuk Modal log console
+        print(f"[GCAL SUCCESS] ID: {event_id}, Title: {title}, Time: {start_dt}-{end_dt}")
+        
         return (
-            f"\u2705 Event '{title}' berhasil dibuat di Google Calendar\n"
-            f"\ud83d\uddd3\ufe0f {start_dt.strftime('%d %b %Y %H:%M')} - {end_dt.strftime('%H:%M')} WIB\n"
-            f"\ud83d\udd17 {link}"
+            f"✅ Event '{title}' berhasil dibuat di Google Calendar!\n"
+            f"📅 {start_dt.strftime('%d %b %Y %H:%M')} - {end_dt.strftime('%H:%M')} WIB\n"
+            f"🔗 {link}"
         )
     except Exception as e:
-        print(f"[GCAL ERROR] {e}")
-        return f"Gagal membuat GCal event: {str(e)}"
+        error_msg = f"Gagal membuat GCal event: {str(e)}"
+        print(f"[GCAL ERROR] {error_msg}")
+        return error_msg
+
+def list_google_calendars() -> str:
+    """Melihat daftar kalender yang tersedia di akun Google kamu.
+    Gunakan ini jika user merasa event tidak muncul, untuk memastikan kita memakai Calendar ID yang benar.
+    """
+    try:
+        service = _build_gcal_service()
+        calendar_list = service.calendarList().list().execute()
+        calendars = calendar_list.get('items', [])
+        
+        if not calendars:
+            return "Tidak ditemukan kalender di akun ini."
+            
+        result = "Daftar Kalender Google kamu:\n"
+        for cal in calendars:
+            primary_mark = " (PRIMARY)" if cal.get('primary') else ""
+            result += f"- {cal['summary']} (ID: {cal['id']}){primary_mark}\n"
+        
+        result += "\n💡 Jika 'primary' bukan kalender yang kamu mau, silakan set GCAL_CALENDAR_ID dengan ID di atas."
+        return result
+    except Exception as e:
+        return f"Gagal list kalender: {str(e)}"
 
 def create_notion_task(task_name: str, duration: str = "", date_str: str = "", start_time: str = "") -> str:
     """Creates a new task in the Notion database dan opsional sync ke Google Calendar.
@@ -583,25 +605,29 @@ def process_with_ai(user_input: str, audio_data: dict = None) -> str:
     system_instruction = (
         "Kamu adalah asisten/teman akrab yang santai dan ceplas-ceplos. "
         "Tugasmu membantu mengelola jadwal dan tugas di Notion.\n"
+        "ATURAN PALING PENTING: Jangan pernah bilang 'berhasil' atau 'sudah dibuat' sebelum kamu BENAR-BENAR memanggil tool-nya! "
+        "Jika Google Calendar berhasil, WAJIB sertakan link eventnya di reply.\n"
         "Gunakan 'create_notion_task' jika user meminta membuat target/jadwal untuk TANGGAL TERTENTU (misal hari ini/besok).\n"
         "Gunakan 'add_to_routine' jika user meminta menambahkan aktivitas ke rutinitas HARIAN/tiap pagi.\n"
         "Gunakan 'remove_from_routine' jika user minta hapus rutinitas harian.\n"
         "Gunakan 'update_notion_task' jika user meminta update status SATU task spesifik (centang/selesai/done/belum).\n"
         "Gunakan 'mark_all_tasks' jika user bilang 'semua selesai', 'tandai semua', 'checklist semua', 'semua done', dsb.\n"
         "Gunakan 'get_daily_report' jika user menanyakan tugas apa saja hari ini atau report tugas yang belum dikerjakan.\n"
-        "Gunakan 'create_google_calendar_event' jika user ingin membuat event/jadwal dengan JAM SPESIFIK secara langsung ke Google Calendar.\n"
-        "Jika user menyebut JAM AKHIR (contoh: 'sampai jam 17', 'dari jam 2 sampai jam 5'), WAJIB isi end_time (format HH:MM) di create_google_calendar_event.\n"
-        "Jika user menyebutkan jam spesifik saat membuat task (misal 'jam 3 sore'), SELALU isi start_time di create_notion_task agar otomatis masuk Google Calendar.\n"
+        "Gunakan 'create_google_calendar_event' jika user ingin membuat event/jadwal dengan JAM SPESIFIK ke Google Calendar. "
+        "Setelah tool berhasil, SELALU tampilkan link Google Calendar-nya ke user.\n"
+        "Gunakan 'list_google_calendars' jika user bingung kenapa jadwal tidak muncul.\n"
+        "Jika user menyebut JAM AKHIR (contoh: 'sampai jam 17', 'dari jam 2 sampai jam 5'), WAJIB isi end_time (format HH:MM).\n"
+        "Jika user menyebutkan jam spesifik saat membuat task (misal 'jam 3 sore'), SELALU isi start_time di create_notion_task.\n"
         "Gunakan 'save_memory' jika user meminta kamu untuk INGAT atau CATAT sesuatu tentang dirinya.\n"
         "Gunakan 'delete_memory' jika user meminta kamu untuk LUPA atau HAPUS sesuatu dari ingatan.\n"
         "Jika ada input suara (voice note), transkripsikan permintaannya dan jalankan perintahnya.\n"
-        "Jawab dengan singkat, asik, pakai emoji ✅ jika sukses, dan jangan kaku."
+        "Jawab dengan singkat, asik, pakai emoji, dan jangan kaku."
         f"{memory_context}"
     )
 
     tools_list = [
         update_notion_task, mark_all_tasks, create_notion_task,
-        create_google_calendar_event, get_daily_report,
+        create_google_calendar_event, list_google_calendars, get_daily_report,
         add_to_routine, remove_from_routine,
         save_memory, delete_memory
     ]
@@ -609,15 +635,20 @@ def process_with_ai(user_input: str, audio_data: dict = None) -> str:
     contents = []
     if audio_data:
         contents.append(audio_data)
-    contents.append(f"SYSTEM: {system_instruction}\nUSER: {user_input}")
-    
+    contents.append(user_input)
+
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash', tools=tools_list)
+        # Default model: Gemini 3.1 Flash Lite
+        model = genai.GenerativeModel(
+            'gemini-3.1-flash-lite-preview',
+            tools=tools_list,
+            system_instruction=system_instruction
+        )
         chat = model.start_chat(enable_automatic_function_calling=True)
         response = chat.send_message(contents)
         return response.text
     except Exception as e:
-        print(f"Primary model (2.5-flash) error: {e}")
+        print(f"Primary model (gemini-3.1-flash-lite-preview) error: {e}")
 
     # -------------------------------------------------------
     # FALLBACK CHAIN (text-capable models only)
@@ -625,15 +656,19 @@ def process_with_ai(user_input: str, audio_data: dict = None) -> str:
     # Urutan: paling kuat → paling ringan
     # -------------------------------------------------------
     FALLBACK_MODELS = [
-        "gemini-3-flash-preview",        # Gemini 3 Flash – generasi terbaru, general purpose
-        "gemini-3.1-flash-lite-preview", # Gemini 3.1 Flash Lite – ringan, hemat kuota
-        "gemini-2.5-flash-lite-preview", # Gemini 2.5 Flash Lite – fallback gen lama yang stabil
+        "gemini-2.5-pro-preview-05-06",  # Gemini 2.5 Pro – paling pintar, fallback utama
+        "gemini-3-flash-preview",         # Gemini 3 Flash – generasi terbaru
+        "gemini-2.5-flash-preview-05-20", # Gemini 2.5 Flash – stabil
     ]
 
     for fallback_id in FALLBACK_MODELS:
         try:
             print(f"Trying fallback model: {fallback_id}")
-            fallback_model = genai.GenerativeModel(fallback_id, tools=tools_list)
+            fallback_model = genai.GenerativeModel(
+                fallback_id,
+                tools=tools_list,
+                system_instruction=system_instruction
+            )
             fallback_chat = fallback_model.start_chat(enable_automatic_function_calling=True)
             fallback_response = fallback_chat.send_message(contents)
             return fallback_response.text
