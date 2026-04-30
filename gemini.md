@@ -49,6 +49,7 @@
 - **Reminders (05:00 & 18:00):** Gunakan kalimat "tamparan" yang memotivasi secara keras (contoh: "Katanya mau konsisten", "Mau rebahan aja nih?", "Bangun woi, mimpi lo gak bakal kecapai kalau lo cuma tiduran!").
 - **Delivery:** Selalu sertakan emoji ✅ jika aksi di Notion berhasil dilakukan.
 - **Model Fallback:** Utamakan model `gemini-2.5-pro`. Jika limit/habis, fallback ke model yang tersedia (misal: `gemini-1.5-pro` atau `gemini-1.5-flash`).
+- **Git Push:** Setiap ada perubahan code/config yang valid, langsung lakukan commit dan push ke GitHub repository `awingmawe/task-scheduler`.
 
 ## Architectural Invariants
 - 3-Layer Architecture (Architecture, Navigation, Tools)
