@@ -1,0 +1,8 @@
+.env
+.tmp/
+__pycache__/
+*.pyc
+tools/client_secret_*.json
+tools/token.json
+.gemini/
+*.log
