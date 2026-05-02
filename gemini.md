@@ -265,8 +265,8 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=<MODAL_URL>/webhook"
 - **Tanggal:** 2026-05-02
 - **Gejala:** Warning `AsyncUsageWarning` di Modal log saat chat Telegram masuk.
 - **Penyebab:** `dedup_store.get(key)` dan `dedup_store[key] = now` adalah blocking calls yang dipanggil di dalam async handler (`telegram_webhook`).
-- **Solusi:** Ubah `_is_duplicate()` jadi `async def` dan pakai `await dedup_store.get.aio(key)` serta `await dedup_store.put.aio(key, now)`.
-- **Status:** Teridentifikasi. Belum dipatch.
+- **Solusi:** Ubah `_is_duplicate()` jadi `async def` dan pakai `await dedup_store.get.aio(key)` serta `await dedup_store.put.aio(key, now)`. Caller di webhook di-update jadi `await _is_duplicate(...)`.
+- **Status:** ✅ **FIXED** — 2026-05-02.
 
 ### 2. `get_daily_report()` — checkbox lookup bisa return 0%
 - **Tanggal:** 2026-05-02
