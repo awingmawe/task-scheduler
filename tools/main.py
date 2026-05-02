@@ -304,14 +304,12 @@ def list_google_calendars() -> str:
         return f"Gagal list kalender: {str(e)}"
 
 def create_notion_task(task_name: str, duration: str = "", date_str: str = "", start_time: str = "") -> str:
-    """Creates a new task in the Notion database dan opsional sync ke Google Calendar.
-    duration: String representing time/duration (e.g., '2 Jam'). Can be empty.
-    date_str: Date in 'YYYY-MM-DD' format. If empty, uses today.
-    start_time: Jam mulai format HH:MM (24 jam). Jika diisi, event otomatis dibuat di Google Calendar.
+    """Buat task baru di Notion untuk tanggal tertentu. Opsional sync ke Google Calendar.
+    duration: durasi kegiatan (contoh: '2 Jam', '45 Menit').
+    date_str: tanggal format YYYY-MM-DD. Kosong = hari ini.
+    start_time: jam mulai HH:MM. Jika diisi, event otomatis dibuat di Google Calendar.
     """
-    notion = Client(auth=os.environ["NOTION_TOKEN"])
     db_id = os.environ["NOTION_DB_ID"]
-
     if not date_str:
         date_str = datetime.datetime.now().strftime("%Y-%m-%d")
 
@@ -320,40 +318,32 @@ def create_notion_task(task_name: str, duration: str = "", date_str: str = "", s
         "Date": {"date": {"start": date_str}},
         "Status": {"checkbox": False}
     }
-
     if duration:
         properties["Time"] = {"rich_text": [{"text": {"content": duration}}]}
 
     try:
-        notion.pages.create(
-            parent={"database_id": db_id},
-            properties=properties
-        )
-        result = f"\u2705 Berhasil membuat task baru: {task_name} untuk tanggal {date_str}."
+        url = "https://api.notion.com/v1/pages"
+        payload = {"parent": {"database_id": db_id}, "properties": properties}
+        resp = requests.post(url, headers=_notion_headers(), json=payload)
+        resp.raise_for_status()
+        result = f"Task baru '{task_name}' berhasil dibuat untuk {date_str}."
 
-        # Otomatis sync ke Google Calendar jika start_time disertakan
         if start_time:
-            # Hitung durasi dalam menit dari string duration (e.g. "2 Jam", "45 Menit")
-            duration_minutes = 60  # default
+            duration_minutes = 60
             if duration:
                 dur_lower = duration.lower()
                 try:
                     if "jam" in dur_lower:
-                        hours = float(dur_lower.replace("jam", "").strip())
-                        duration_minutes = int(hours * 60)
+                        duration_minutes = int(float(dur_lower.replace("jam", "").strip()) * 60)
                     elif "menit" in dur_lower:
                         duration_minutes = int(dur_lower.replace("menit", "").strip())
                 except ValueError:
                     pass
-
             gcal_result = create_google_calendar_event(
-                title=task_name,
-                date_str=date_str,
-                start_time=start_time,
-                duration_minutes=duration_minutes
+                title=task_name, date_str=date_str,
+                start_time=start_time, duration_minutes=duration_minutes
             )
             result += f"\n{gcal_result}"
-
         return result
     except Exception as e:
         return f"Gagal membuat task: {str(e)}"
@@ -396,48 +386,249 @@ def get_daily_report(date_str: str = "") -> str:
         
         for page in results:
             props = page["properties"]
-            name = props["Name"]["title"][0]["text"]["content"] if props["Name"]["title"] else "Untitled"
-            status = props["Status"]["checkbox"] if "Status" in props else False
-            
+            name_list = props["Name"]["title"]
+            name = name_list[0]["text"]["content"] if name_list else "Untitled"
+            if "[CONFIG]" in name:
+                continue
+            status = props.get("Status", {}).get("checkbox", False)
+            summary_list = props.get("Notes / Summary", {}).get("rich_text", [])
+            summary = summary_list[0]["text"]["content"] if summary_list else ""
             if status:
-                completed.append(name)
+                completed.append((name, summary))
             else:
-                pending.append(name)
+                pending.append((name, summary))
                 
-        report = f"📊 Report Task untuk {date_str}:\n\n"
-        report += f"**Belum Dikerjakan ({len(pending)}):**\n"
-        for t in pending:
-            report += f"- ❌ {t}\n"
-            
-        report += f"\n**Selesai ({len(completed)}):**\n"
-        for t in completed:
-            report += f"- ✅ {t}\n"
-            
-        return report
+        report_lines = [
+            f"📊 DAILY REPORT — {date_str}",
+            f"Progress: {len(completed)}/{len(completed)+len(pending)} task selesai",
+            ""
+        ]
+        if pending:
+            report_lines.append(f"❌ Belum selesai ({len(pending)}):")
+            for name, summary in pending:
+                report_lines.append(f"  - {name}")
+                if summary:
+                    report_lines.append(f"    📝 {summary}")
+        if completed:
+            report_lines.append(f"\n✅ Selesai ({len(completed)}):")
+            for name, summary in completed:
+                report_lines.append(f"  - {name}")
+                if summary:
+                    report_lines.append(f"    📝 {summary}")
+        return "\n".join(report_lines)
     except Exception as e:
         return f"Gagal mengambil report: {str(e)}"
 
+def delete_notion_task(task_name: str, date_str: str = "") -> str:
+    """Hapus sebuah task dari Notion berdasarkan nama dan tanggal.
+    task_name: nama atau sebagian nama task yang ingin dihapus.
+    date_str: tanggal format YYYY-MM-DD. Kosong = hari ini.
+    """
+    db_id = os.environ["NOTION_DB_ID"]
+    if not date_str:
+        date_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    try:
+        url = f"https://api.notion.com/v1/databases/{db_id}/query"
+        payload = {
+            "filter": {
+                "and": [
+                    {"property": "Name", "title": {"contains": task_name}},
+                    {"property": "Date", "date": {"equals": date_str}},
+                    {"property": "Name", "title": {"does_not_contain": "[CONFIG]"}}
+                ]
+            }
+        }
+        resp = requests.post(url, headers=_notion_headers(), json=payload).json()
+        results = resp.get("results", [])
+        if not results:
+            return f"Task '{task_name}' untuk tanggal {date_str} tidak ditemukan."
+        page_id = results[0]["id"]
+        del_url = f"https://api.notion.com/v1/pages/{page_id}"
+        requests.patch(del_url, headers=_notion_headers(), json={"archived": True})
+        return f"Task '{task_name}' ({date_str}) berhasil dihapus."
+    except Exception as e:
+        return f"Gagal hapus task: {str(e)}"
+
+
+def _format_report_section(title: str, done: list, pending: list, total_days: int = None) -> str:
+    """Helper: format blok report rapih dengan % completion."""
+    total = len(done) + len(pending)
+    pct = int(len(done) / total * 100) if total > 0 else 0
+    bar_filled = int(pct / 10)
+    bar = "█" * bar_filled + "░" * (10 - bar_filled)
+    lines = [f"{title}", f"Progress: [{bar}] {pct}% ({len(done)}/{total})"]
+    if pending:
+        lines.append("Belum selesai:")
+        for t in pending:
+            lines.append(f"  - {t}")
+    if done:
+        lines.append("Selesai:")
+        for t in done:
+            lines.append(f"  - {t}")
+    return "\n".join(lines)
+
+
+def get_weekly_report(week_offset: int = 0) -> str:
+    """Buat laporan mingguan: berapa task selesai per hari, habit mana paling sering dilewat.
+    week_offset: 0 = minggu ini, -1 = minggu lalu, dst.
+    """
+    db_id = os.environ["NOTION_DB_ID"]
+    today = datetime.datetime.now().date()
+    # Hitung Senin dan Minggu dari minggu target
+    days_since_monday = today.weekday()
+    monday = today - datetime.timedelta(days=days_since_monday) + datetime.timedelta(weeks=week_offset)
+    sunday = monday + datetime.timedelta(days=6)
+    try:
+        url = f"https://api.notion.com/v1/databases/{db_id}/query"
+        payload = {
+            "filter": {
+                "and": [
+                    {"property": "Date", "date": {"on_or_after": str(monday)}},
+                    {"property": "Date", "date": {"on_or_before": str(sunday)}},
+                    {"property": "Name", "title": {"does_not_contain": "[CONFIG]"}}
+                ]
+            },
+            "sorts": [{"property": "Date", "direction": "ascending"}]
+        }
+        resp = requests.post(url, headers=_notion_headers(), json=payload).json()
+        results = resp.get("results", [])
+        if not results:
+            return f"Tidak ada task minggu {monday} s/d {sunday}."
+
+        # Group by date
+        by_date: dict = {}
+        habit_stats: dict = {}
+        for page in results:
+            props = page["properties"]
+            name_list = props["Name"]["title"]
+            name = name_list[0]["text"]["content"] if name_list else "Untitled"
+            date_val = props.get("Date", {}).get("date", {})
+            date_str = date_val.get("start", "") if date_val else ""
+            status = props.get("Status", {}).get("checkbox", False)
+            if not date_str:
+                continue
+            by_date.setdefault(date_str, {"done": [], "pending": []})
+            by_date[date_str]["done" if status else "pending"].append(name)
+            habit_stats.setdefault(name, {"done": 0, "total": 0})
+            habit_stats[name]["total"] += 1
+            if status:
+                habit_stats[name]["done"] += 1
+
+        total_done = sum(len(v["done"]) for v in by_date.values())
+        total_all = sum(len(v["done"]) + len(v["pending"]) for v in by_date.values())
+        pct = int(total_done / total_all * 100) if total_all > 0 else 0
+
+        lines = [
+            f"📊 LAPORAN MINGGUAN",
+            f"📅 {monday.strftime('%d %b')} — {sunday.strftime('%d %b %Y')}",
+            f"Overall: {total_done}/{total_all} task selesai ({pct}%)",
+            ""
+        ]
+
+        # Per hari
+        DAY_NAMES = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"]
+        for d in sorted(by_date.keys()):
+            dt = datetime.date.fromisoformat(d)
+            day_name = DAY_NAMES[dt.weekday()]
+            done_n = len(by_date[d]["done"])
+            total_n = done_n + len(by_date[d]["pending"])
+            status_emoji = "✅" if done_n == total_n else ("⚠️" if done_n > 0 else "❌")
+            lines.append(f"{status_emoji} {day_name} {dt.strftime('%d/%m')}: {done_n}/{total_n} task selesai")
+
+        # Habit paling sering dilewat
+        missed = [(k, v) for k, v in habit_stats.items() if v["done"] < v["total"]]
+        missed.sort(key=lambda x: x[1]["done"] / x[1]["total"])
+        if missed:
+            lines.append("")
+            lines.append("🔴 Habit yang sering dilewat minggu ini:")
+            for name, stat in missed[:3]:
+                h_pct = int(stat["done"] / stat["total"] * 100)
+                lines.append(f"  - {name}: {stat['done']}/{stat['total']} hari ({h_pct}%)")
+
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Gagal buat weekly report: {str(e)}"
+
+
+def get_monthly_report(month_offset: int = 0) -> str:
+    """Buat laporan bulanan: konsistensi per habit selama sebulan.
+    month_offset: 0 = bulan ini, -1 = bulan lalu.
+    """
+    db_id = os.environ["NOTION_DB_ID"]
+    today = datetime.datetime.now().date()
+    target = today.replace(day=1) + datetime.timedelta(days=32 * month_offset)
+    first_day = target.replace(day=1)
+    # Last day of month
+    next_month = (first_day.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
+    last_day = next_month - datetime.timedelta(days=1)
+    try:
+        url = f"https://api.notion.com/v1/databases/{db_id}/query"
+        payload = {
+            "filter": {
+                "and": [
+                    {"property": "Date", "date": {"on_or_after": str(first_day)}},
+                    {"property": "Date", "date": {"on_or_before": str(last_day)}},
+                    {"property": "Name", "title": {"does_not_contain": "[CONFIG]"}}
+                ]
+            },
+            "sorts": [{"property": "Date", "direction": "ascending"}]
+        }
+        resp = requests.post(url, headers=_notion_headers(), json=payload).json()
+        results = resp.get("results", [])
+        if not results:
+            return f"Tidak ada task untuk bulan {first_day.strftime('%B %Y')}."
+
+        habit_stats: dict = {}
+        dates_with_tasks: set = set()
+        for page in results:
+            props = page["properties"]
+            name_list = props["Name"]["title"]
+            name = name_list[0]["text"]["content"] if name_list else "Untitled"
+            date_val = props.get("Date", {}).get("date", {})
+            date_str = date_val.get("start", "") if date_val else ""
+            status = props.get("Status", {}).get("checkbox", False)
+            if not date_str:
+                continue
+            dates_with_tasks.add(date_str)
+            habit_stats.setdefault(name, {"done": 0, "total": 0})
+            habit_stats[name]["total"] += 1
+            if status:
+                habit_stats[name]["done"] += 1
+
+        total_days = len(dates_with_tasks)
+        total_done = sum(v["done"] for v in habit_stats.values())
+        total_all = sum(v["total"] for v in habit_stats.values())
+        pct = int(total_done / total_all * 100) if total_all > 0 else 0
+
+        lines = [
+            f"📊 LAPORAN BULANAN — {first_day.strftime('%B %Y').upper()}",
+            f"📅 Total hari aktif: {total_days} hari",
+            f"Overall: {total_done}/{total_all} task selesai ({pct}%)",
+            ""
+        ]
+
+        # Per habit
+        lines.append("Konsistensi per habit:")
+        for name, stat in sorted(habit_stats.items(), key=lambda x: -x[1]["done"] / max(x[1]["total"], 1)):
+            h_pct = int(stat["done"] / stat["total"] * 100) if stat["total"] > 0 else 0
+            bar_filled = int(h_pct / 10)
+            bar = "█" * bar_filled + "░" * (10 - bar_filled)
+            emoji = "🟢" if h_pct >= 80 else ("🟡" if h_pct >= 50 else "🔴")
+            lines.append(f"{emoji} {name}")
+            lines.append(f"   [{bar}] {h_pct}% ({stat['done']}/{stat['total']} hari)")
+
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Gagal buat monthly report: {str(e)}"
+
+
 def get_master_routine_config() -> tuple[str, list]:
     db_id = os.environ["NOTION_DB_ID"]
-    token = os.environ["NOTION_TOKEN"]
-    
     url = f"https://api.notion.com/v1/databases/{db_id}/query"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-        "Notion-Version": "2022-06-28"
-    }
-    payload = {
-        "filter": {
-            "property": "Name",
-            "title": {"equals": "[CONFIG] MASTER ROUTINE"}
-        }
-    }
-    resp = requests.post(url, headers=headers, json=payload).json()
+    payload = {"filter": {"property": "Name", "title": {"equals": "[CONFIG] MASTER ROUTINE"}}}
+    resp = requests.post(url, headers=_notion_headers(), json=payload).json()
     results = resp.get("results", [])
-    
-    notion = Client(auth=token)
-    
+
     if not results:
         default_routine = [
             {"name": "Praktik AI Engineer", "duration": "2 Jam"},
@@ -448,32 +639,33 @@ def get_master_routine_config() -> tuple[str, list]:
             {"name": "Belajar Interview", "duration": "30 Menit"},
             {"name": "Belajar Bahasa Inggris", "duration": "15 Menit"},
         ]
-        page = notion.pages.create(
-            parent={"database_id": db_id},
-            properties={
-                "Name": {"title": [{"text": {"content": "[CONFIG] MASTER ROUTINE"}}]},
-                "Notes / Summary": {"rich_text": [{"text": {"content": json.dumps(default_routine)}}]}
+        page_resp = requests.post(
+            "https://api.notion.com/v1/pages",
+            headers=_notion_headers(),
+            json={
+                "parent": {"database_id": db_id},
+                "properties": {
+                    "Name": {"title": [{"text": {"content": "[CONFIG] MASTER ROUTINE"}}]},
+                    "Notes / Summary": {"rich_text": [{"text": {"content": json.dumps(default_routine)}}]}
+                }
             }
-        )
-        return page["id"], default_routine
-        
+        ).json()
+        return page_resp["id"], default_routine
+
     page = results[0]
     page_id = page["id"]
     try:
-        props = page["properties"]
-        content = props["Notes / Summary"]["rich_text"][0]["text"]["content"]
-        routine_list = json.loads(content)
-        return page_id, routine_list
+        content = page["properties"]["Notes / Summary"]["rich_text"][0]["text"]["content"]
+        return page_id, json.loads(content)
     except:
         return page_id, []
 
+
 def update_master_routine_config(page_id: str, new_routine: list):
-    notion = Client(auth=os.environ["NOTION_TOKEN"])
-    notion.pages.update(
-        page_id=page_id,
-        properties={
-            "Notes / Summary": {"rich_text": [{"text": {"content": json.dumps(new_routine)}}]}
-        }
+    url = f"https://api.notion.com/v1/pages/{page_id}"
+    requests.patch(
+        url, headers=_notion_headers(),
+        json={"properties": {"Notes / Summary": {"rich_text": [{"text": {"content": json.dumps(new_routine)}}]}}}
     )
 
 def add_to_routine(task_name: str, duration: str = "") -> str:
@@ -605,29 +797,34 @@ def process_with_ai(user_input: str, audio_data: dict = None) -> str:
     system_instruction = (
         "Kamu adalah asisten/teman akrab yang santai dan ceplas-ceplos. "
         "Tugasmu membantu mengelola jadwal dan tugas di Notion.\n"
-        "ATURAN PALING PENTING: Jangan pernah bilang 'berhasil' atau 'sudah dibuat' sebelum kamu BENAR-BENAR memanggil tool-nya! "
-        "Jika Google Calendar berhasil, WAJIB sertakan link eventnya di reply.\n"
-        "Gunakan 'create_notion_task' jika user meminta membuat target/jadwal untuk TANGGAL TERTENTU (misal hari ini/besok).\n"
-        "Gunakan 'add_to_routine' jika user meminta menambahkan aktivitas ke rutinitas HARIAN/tiap pagi.\n"
-        "Gunakan 'remove_from_routine' jika user minta hapus rutinitas harian.\n"
-        "Gunakan 'update_notion_task' jika user meminta update status SATU task spesifik (centang/selesai/done/belum).\n"
-        "Gunakan 'mark_all_tasks' jika user bilang 'semua selesai', 'tandai semua', 'checklist semua', 'semua done', dsb.\n"
-        "Gunakan 'get_daily_report' jika user menanyakan tugas apa saja hari ini atau report tugas yang belum dikerjakan.\n"
-        "Gunakan 'create_google_calendar_event' jika user ingin membuat event/jadwal dengan JAM SPESIFIK ke Google Calendar. "
-        "Setelah tool berhasil, SELALU tampilkan link Google Calendar-nya ke user.\n"
+        "ATURAN PALING PENTING: Jangan pernah bilang 'berhasil' sebelum BENAR-BENAR memanggil tool-nya!\n"
+        "Gunakan 'create_notion_task' untuk buat task di tanggal TERTENTU (hari ini/besok/tanggal spesifik).\n"
+        "Gunakan 'delete_notion_task' jika user minta HAPUS task tertentu.\n"
+        "Gunakan 'add_to_routine' jika user minta tambah aktivitas ke rutinitas HARIAN.\n"
+        "Gunakan 'remove_from_routine' jika user minta hapus dari rutinitas harian.\n"
+        "Gunakan 'update_notion_task' untuk update status SATU task. "
+        "PENTING: jika user kirim summary/resume aktivitas (via teks atau voice note), "
+        "ekstrak nama task-nya dan simpan teks summary-nya di parameter 'summary'. "
+        "Tandai status=True jika user menyatakan sudah selesai.\n"
+        "Gunakan 'mark_all_tasks' jika user bilang 'semua selesai', 'tandai semua done', dsb.\n"
+        "Gunakan 'get_daily_report' untuk laporan task hari ini. Report sudah include summary per task.\n"
+        "Gunakan 'get_weekly_report' jika user tanya progress/recap minggu ini atau minggu lalu.\n"
+        "Gunakan 'get_monthly_report' jika user tanya recap/laporan bulan ini atau bulan lalu.\n"
+        "Gunakan 'create_google_calendar_event' untuk buat event dengan JAM SPESIFIK di Google Calendar. "
+        "SELALU tampilkan link eventnya setelah berhasil.\n"
         "Gunakan 'list_google_calendars' jika user bingung kenapa jadwal tidak muncul.\n"
-        "Jika user menyebut JAM AKHIR (contoh: 'sampai jam 17', 'dari jam 2 sampai jam 5'), WAJIB isi end_time (format HH:MM).\n"
-        "Jika user menyebutkan jam spesifik saat membuat task (misal 'jam 3 sore'), SELALU isi start_time di create_notion_task.\n"
-        "Gunakan 'save_memory' jika user meminta kamu untuk INGAT atau CATAT sesuatu tentang dirinya.\n"
-        "Gunakan 'delete_memory' jika user meminta kamu untuk LUPA atau HAPUS sesuatu dari ingatan.\n"
-        "Jika ada input suara (voice note), transkripsikan permintaannya dan jalankan perintahnya.\n"
-        "Jawab dengan singkat, asik, pakai emoji, dan jangan kaku."
+        "Jika user sebut JAM AKHIR (contoh: 'sampai jam 17'), WAJIB isi end_time (format HH:MM).\n"
+        "Gunakan 'save_memory' jika user minta INGAT sesuatu tentang dirinya.\n"
+        "Gunakan 'delete_memory' jika user minta LUPA/HAPUS dari ingatan.\n"
+        "Jika ada voice note, transkripsikan dulu baru jalankan instruksinya.\n"
+        "Jawab singkat, asik, pakai emoji, jangan kaku."
         f"{memory_context}"
     )
 
     tools_list = [
-        update_notion_task, mark_all_tasks, create_notion_task,
-        create_google_calendar_event, list_google_calendars, get_daily_report,
+        update_notion_task, mark_all_tasks, create_notion_task, delete_notion_task,
+        create_google_calendar_event, list_google_calendars,
+        get_daily_report, get_weekly_report, get_monthly_report,
         add_to_routine, remove_from_routine,
         save_memory, delete_memory
     ]
@@ -789,4 +986,13 @@ def evening_slap():
     )
     send_telegram_message(msg)
 
-
+# Minggu 18:00 WIB = Minggu 11:00 UTC (hari Minggu = 0 di cron = Senin, jadi pakai 0 = Minggu)
+@app.function(image=image, schedule=modal.Cron("0 11 * * 0"), secrets=[modal.Secret.from_name("my-notion-secrets")])
+def weekly_report_slap():
+    report = get_weekly_report(week_offset=0)
+    msg = (
+        "Nih recap minggu ini, jujur aja liat sendiri ya udah konsisten apa belum!\n\n"
+        f"{report}\n\n"
+        "Minggu depan harus lebih baik! Kalau ada yang sering dilewat, fix rutinitas lo sekarang!"
+    )
+    send_telegram_message(msg)
