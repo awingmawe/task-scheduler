@@ -16,7 +16,9 @@ def setup_notion_db():
             "Date": {"date": {}},
             "Time": {"rich_text": {}},
             "Status": {"checkbox": {}},
-            "Notes / Summary": {"rich_text": {}}
+            "Notes / Summary": {"rich_text": {}},
+            "🔥 Streak": {"number": {}},
+            "🤖 Refleksi AI": {"rich_text": {}}
         }
         
         response = notion.databases.update(

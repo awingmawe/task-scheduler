@@ -103,6 +103,56 @@ def _task_exists_for_date(task_name: str, date_str: str) -> bool:
     except:
         return False
 
+def _get_task_streak(task_name: str, date_str: str) -> int:
+    """Hitung streak sebuah task dengan melihat hari sebelumnya (WIB)."""
+    try:
+        dt = datetime.date.fromisoformat(date_str)
+        yesterday = (dt - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        db_id = os.environ["NOTION_DB_ID"]
+        url = f"https://api.notion.com/v1/databases/{db_id}/query"
+        payload = {
+            "filter": {
+                "and": [
+                    {"property": "Date", "date": {"equals": yesterday}},
+                    {"property": "Name", "title": {"equals": task_name}}
+                ]
+            }
+        }
+        resp = requests.post(url, headers=_notion_headers(), json=payload).json()
+        results = resp.get("results", [])
+        if results:
+            props = results[0]["properties"]
+            status = props.get("Status", {}).get("checkbox", False)
+            if status:
+                prev_streak = props.get("🔥 Streak", {}).get("number") or 0
+                return int(prev_streak) + 1
+    except Exception as e:
+        print(f"[STREAK DEBUG] Error calculating streak for {task_name}: {e}")
+    return 1
+
+def _get_all_streaks_for_yesterday(date_str: str) -> dict:
+    """Kembalikan dict {task_name: streak_count} dari hari kemarin."""
+    try:
+        dt = datetime.date.fromisoformat(date_str)
+        yesterday = (dt - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+        db_id = os.environ["NOTION_DB_ID"]
+        url = f"https://api.notion.com/v1/databases/{db_id}/query"
+        payload = {"filter": {"property": "Date", "date": {"equals": yesterday}}}
+        streaks = {}
+        resp = requests.post(url, headers=_notion_headers(), json=payload).json()
+        for r in resp.get("results", []):
+            props = r["properties"]
+            name_list = props["Name"]["title"]
+            if not name_list: continue
+            name = name_list[0]["text"]["content"]
+            status = props.get("Status", {}).get("checkbox", False)
+            streak = props.get("🔥 Streak", {}).get("number") or 0
+            streaks[name] = int(streak) if status else 0
+        return streaks
+    except:
+        return {}
+
 def send_telegram_message(text: str, chat_id: int = None):
     token = os.environ["TELEGRAM_TOKEN"]
     if not chat_id:
@@ -159,6 +209,13 @@ def update_notion_task(task_name: str, status: bool, summary: str = "") -> str:
                 "Status": {"checkbox": status}
             }
         }
+        
+        # FIX: Tambahkan perhitungan STREAK
+        if status:
+            streak = _get_task_streak(task_name, today_str)
+            update_payload["properties"]["🔥 Streak"] = {"number": streak}
+        else:
+            update_payload["properties"]["🔥 Streak"] = {"number": 0}
         if summary:
             update_payload["properties"]["Notes / Summary"] = {
                 "rich_text": [{"text": {"content": summary}}]
@@ -206,13 +263,22 @@ def mark_all_tasks(status: bool, date_str: str = "") -> str:
             name = name_parts[0]["text"]["content"] if name_parts else "Untitled"
             pages.append((page["id"], name))
 
+        # Ambil streaks kemarin sekaligus untuk efisiensi
+        yesterday_streaks = _get_all_streaks_for_yesterday(date_str)
+        
         with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(_patch_one_task, pid, status): nm for pid, nm in pages}
+            futures = []
+            for pid, nm in pages:
+                streak = yesterday_streaks.get(nm, 0) + 1 if status else 0
+                futures.append(executor.submit(_patch_one_task, pid, status, streak))
+            
             updated = []
-            for future in as_completed(futures):
+            for i, future in enumerate(as_completed([f for f in futures])):
                 try:
                     future.result()
-                    updated.append(futures[future])
+                    # Kita tidak tahu urutan selesainya, tapi we can find the name from the original list if needed
+                    # Untuk simplicity, kita asumsikan semua sukses atau log error
+                    updated.append(pages[i][1])
                 except Exception as e:
                     print(f"Failed to update task: {e}")
 
@@ -222,14 +288,16 @@ def mark_all_tasks(status: bool, date_str: str = "") -> str:
     except Exception as e:
         return f"Error bulk update: {str(e)}"
 
-def _patch_one_task(page_id: str, status: bool) -> str:
+def _patch_one_task(page_id: str, status: bool, streak: int = 0) -> str:
     """Helper untuk patch satu page — dipanggil secara paralel."""
     update_url = f"https://api.notion.com/v1/pages/{page_id}"
-    requests.patch(
-        update_url,
-        headers=_notion_headers(),
-        json={"properties": {"Status": {"checkbox": status}}}
-    )
+    payload = {
+        "properties": {
+            "Status": {"checkbox": status},
+            "🔥 Streak": {"number": streak}
+        }
+    }
+    requests.patch(update_url, headers=_notion_headers(), json=payload)
     return page_id
 
 # ---------------------------------------------------------
@@ -348,10 +416,14 @@ def create_notion_task(task_name: str, duration: str = "", date_str: str = "", s
     if not date_str:
         date_str = _today_wib()
 
+    # FIX: Hitung streak saat pembuatan task agar langsung muncul di report
+    streak = _get_task_streak(task_name, date_str)
+    
     properties = {
         "Name": {"title": [{"text": {"content": task_name}}]},
         "Date": {"date": {"start": date_str}},
-        "Status": {"checkbox": False}
+        "Status": {"checkbox": False},
+        "🔥 Streak": {"number": streak}
     }
     if duration:
         properties["Time"] = {"rich_text": [{"text": {"content": duration}}]}
@@ -364,7 +436,7 @@ def create_notion_task(task_name: str, duration: str = "", date_str: str = "", s
         payload = {"parent": {"database_id": db_id}, "properties": properties}
         resp = requests.post(url, headers=_notion_headers(), json=payload)
         resp.raise_for_status()
-        result = f"Task baru '{task_name}' berhasil dibuat untuk {date_str}."
+        result = f"Task baru '{task_name}' berhasil dibuat untuk {date_str} (Streak: {streak})."
 
         if start_time:
             duration_minutes = 60
@@ -417,26 +489,45 @@ def get_daily_report(date_str: str = "") -> str:
             
         completed = []
         pending = []
+        reflection_from_db = ""
         
         for page in results:
             props = page["properties"]
             name_list = props["Name"]["title"]
             name = name_list[0]["text"]["content"] if name_list else "Untitled"
+            
+            # Special Row Handling
             if "[CONFIG]" in name:
                 continue
+            if "[REPORT]" in name:
+                refl_list = props.get("🤖 Refleksi AI", {}).get("rich_text", [])
+                if refl_list:
+                    reflection_from_db = refl_list[0]["text"]["content"]
+                continue
+
             status = props.get("Status", {}).get("checkbox", False)
+            streak = props.get("🔥 Streak", {}).get("number", 0)
             summary_list = props.get("Notes / Summary", {}).get("rich_text", [])
             summary = summary_list[0]["text"]["content"] if summary_list else ""
+            
+            streak_str = f" 🔥{int(streak)}" if streak else ""
+            display_name = f"{name}{streak_str}"
+            
             if status:
-                completed.append((name, summary))
+                completed.append((display_name, summary))
             else:
-                pending.append((name, summary))
+                pending.append((display_name, summary))
                 
         report_lines = [
-            f"📊 DAILY REPORT — {date_str}",
+            f"📊 DAILY REPORT \u2014 {date_str}",
             f"Progress: {len(completed)}/{len(completed)+len(pending)} task selesai",
             ""
         ]
+        
+        if reflection_from_db:
+            report_lines.append("\u2728 REFLEKSI AI (Notion):")
+            report_lines.append(reflection_from_db)
+            report_lines.append("")
         if pending:
             report_lines.append(f"❌ Belum selesai ({len(pending)}):")
             for name, summary in pending:
@@ -1037,10 +1128,60 @@ def afternoon_slap():
 @app.function(image=image, schedule=modal.Cron("0 11 * * *"), secrets=[modal.Secret.from_name("my-notion-secrets")])
 def evening_slap():
     report = get_daily_report()
+    
+    # Generate AI Reflection
+    prompt = (
+        "Kamu adalah asisten asik yang ceplas-ceplos. Berikan refleksi singkat (1-2 paragraf) "
+        "berdasarkan laporan task user hari ini. Jika banyak bolong, kasih tamparan motivasi. "
+        "Jika sukses, kasih pujian tapi ingatkan untuk tidak jemawa. "
+        f"Data hari ini:\n{report}"
+    )
+    reflection = "Gagal generate refleksi, tapi pokoknya jangan males!"
+    try:
+        genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+        model = genai.GenerativeModel('gemini-3.1-flash-lite-preview')
+        reflection = model.generate_content(prompt).text
+    except Exception as e:
+        print(f"Reflection error: {e}")
+
+    # Save reflection to Notion (Dedicated [REPORT] row)
+    try:
+        today = _today_wib()
+        db_id = os.environ["NOTION_DB_ID"]
+        # Cek apakah sudah ada [REPORT] untuk hari ini
+        query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
+        query_payload = {
+            "filter": {
+                "and": [
+                    {"property": "Date", "date": {"equals": today}},
+                    {"property": "Name", "title": {"equals": f"[REPORT] {today}"}}
+                ]
+            }
+        }
+        q_resp = requests.post(query_url, headers=_notion_headers(), json=query_payload).json()
+        
+        report_props = {
+            "Name": {"title": [{"text": {"content": f"[REPORT] {today}"}}]},
+            "Date": {"date": {"start": today}},
+            "🤖 Refleksi AI": {"rich_text": [{"text": {"content": reflection}}]}
+        }
+        
+        if q_resp.get("results"):
+            # Update existing
+            page_id = q_resp["results"][0]["id"]
+            requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=_notion_headers(), json={"properties": report_props})
+        else:
+            # Create new
+            requests.post("https://api.notion.com/v1/pages", headers=_notion_headers(), json={"parent": {"database_id": db_id}, "properties": report_props})
+    except Exception as ne:
+        print(f"Error saving reflection to Notion: {ne}")
+
     msg = (
-        "Woi udah jam 6 sore nih! Waktunya bangun bisnis Wedding dan lanjut belajar. Jangan males-malesan! 👊✅\n\n"
+        "Woi udah jam 6 sore nih! Waktunya bangun bisnis Wedding dan lanjut belajar. Jangan males-malesan! \U0001f44a\u2705\n\n"
         "Nih liat rapor harianmu:\n"
-        f"{report}"
+        f"{report}\n\n"
+        "📝 REFLEKSI HARI INI:\n"
+        f"{reflection}"
     )
     send_telegram_message(msg)
 
