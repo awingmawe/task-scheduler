@@ -68,6 +68,40 @@ def _notion_headers() -> dict:
         "Notion-Version": "2022-06-28"
     }
 
+WIB = datetime.timezone(datetime.timedelta(hours=7))
+
+def _today_wib() -> str:
+    """Return tanggal hari ini dalam timezone WIB (UTC+7) — format YYYY-MM-DD.
+    FIX: Modal berjalan di UTC. Tanpa konversi ini, task dibuat/diquery
+    dengan date UTC yang bisa berbeda 1 hari vs date WIB user.
+    """
+    return datetime.datetime.now(WIB).strftime("%Y-%m-%d")
+
+def _task_exists_for_date(task_name: str, date_str: str) -> bool:
+    """Cek apakah task dengan nama persis sudah ada di Notion untuk tanggal tertentu.
+    Digunakan untuk mencegah duplikat saat morning_slap.
+    """
+    db_id = os.environ["NOTION_DB_ID"]
+    url = f"https://api.notion.com/v1/databases/{db_id}/query"
+    payload = {
+        "filter": {
+            "and": [
+                {"property": "Date", "date": {"equals": date_str}},
+                {"property": "Name", "title": {"equals": task_name}}
+            ]
+        }
+    }
+    try:
+        resp = requests.post(url, headers=_notion_headers(), json=payload).json()
+        results = resp.get("results", [])
+        return any(
+            r["properties"]["Name"]["title"][0]["text"]["content"] == task_name
+            for r in results
+            if r["properties"]["Name"]["title"]
+        )
+    except:
+        return False
+
 def send_telegram_message(text: str, chat_id: int = None):
     token = os.environ["TELEGRAM_TOKEN"]
     if not chat_id:
@@ -90,7 +124,7 @@ def update_notion_task(task_name: str, status: bool, summary: str = "") -> str:
     summary: Catatan singkat tentang progress task (boleh kosong).
     """
     db_id = os.environ["NOTION_DB_ID"]
-    today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    today_str = _today_wib()  # FIX: pakai WIB, bukan UTC
 
     try:
         # Cari task: filter by Name (contains) AND Date (equals today)
@@ -142,7 +176,7 @@ def mark_all_tasks(status: bool, date_str: str = "") -> str:
     """
     db_id = os.environ["NOTION_DB_ID"]
     if not date_str:
-        date_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        date_str = _today_wib()  # FIX: pakai WIB, bukan UTC
 
     try:
         # Ambil semua task untuk tanggal ini
@@ -311,7 +345,7 @@ def create_notion_task(task_name: str, duration: str = "", date_str: str = "", s
     """
     db_id = os.environ["NOTION_DB_ID"]
     if not date_str:
-        date_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        date_str = _today_wib()
 
     properties = {
         "Name": {"title": [{"text": {"content": task_name}}]},
@@ -356,25 +390,18 @@ def get_daily_report(date_str: str = "") -> str:
     token = os.environ["NOTION_TOKEN"]
     
     if not date_str:
-        date_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        date_str = _today_wib()
         
     try:
         url = f"https://api.notion.com/v1/databases/{db_id}/query"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Notion-Version": "2022-06-28"
-        }
         payload = {
             "filter": {
                 "property": "Date",
-                "date": {
-                    "equals": date_str
-                }
+                "date": {"equals": date_str}
             }
         }
         
-        response = requests.post(url, headers=headers, json=payload)
+        response = requests.post(url, headers=_notion_headers(), json=payload)
         response.raise_for_status()
         results = response.json().get("results", [])
         
@@ -426,7 +453,7 @@ def delete_notion_task(task_name: str, date_str: str = "") -> str:
     """
     db_id = os.environ["NOTION_DB_ID"]
     if not date_str:
-        date_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        date_str = _today_wib()  # FIX: pakai WIB, bukan UTC
     try:
         url = f"https://api.notion.com/v1/databases/{db_id}/query"
         payload = {
@@ -945,16 +972,24 @@ def fastapi_app():
 def morning_slap():
     # 1. Ambil list dari Master Routine di Notion
     _, routine_list = get_master_routine_config()
-    
-    # 2. Buat task-task tersebut untuk hari ini
+    today = _today_wib()
+
+    # 2. Buat task — skip jika sudah ada (prevent duplikat)
+    created, skipped = 0, 0
     for task in routine_list:
-        create_notion_task(task["name"], duration=task.get("duration", ""))
-    
+        if _task_exists_for_date(task["name"], today):
+            print(f"[SKIP DEDUP] Task '{task['name']}' sudah ada untuk {today}")
+            skipped += 1
+            continue
+        create_notion_task(task["name"], duration=task.get("duration", ""), date_str=today)
+        created += 1
+
     # 3. Send wake up message
+    skip_note = f" ({skipped} task dilewati karena sudah ada)" if skipped else ""
     msg = (
         "Woi bangun! Pagi ini ada target penting yang udah disiapin.\n"
         "Jangan rebahan aja, mimpi lo gak bakal kecapai kalau cuma tiduran! 👊✅\n\n"
-        f"Aku udah otomatis buatin {len(routine_list)} target aktivitas harianmu di Notion ya. Langsung gass kerjain!"
+        f"Aku udah otomatis buatin {created} target aktivitas harianmu di Notion ya{skip_note}. Langsung gass kerjain!"
     )
     send_telegram_message(msg)
 

@@ -284,24 +284,25 @@ class TestGetDailyReport:
 # ======================================================
 class TestCreateNotionTask:
     def test_creates_task_successfully(self):
-        """Task baru berhasil dibuat di Notion."""
-        mock_notion = MagicMock()
-        mock_notion.pages.create.return_value = {"id": "new-page-id"}
+        """Task baru berhasil dibuat di Notion via raw requests."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {"id": "new-page-id"}
 
-        # Client adalah class, mock instance-nya
-        with patch('tools.main.Client', return_value=mock_notion):
+        with patch('tools.main.requests.post', return_value=mock_resp):
             result = create_notion_task("Task Baru", duration="1 Jam", date_str="2026-05-02")
 
-        assert "✅" in result
         assert "Task Baru" in result
+        assert "2026-05-02" in result
 
     def test_creates_task_with_gcal_sync(self):
         """Task dengan start_time seharusnya trigger GCal event creation."""
-        mock_notion = MagicMock()
-        mock_notion.pages.create.return_value = {"id": "new-page-id"}
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {"id": "new-page-id"}
 
-        with patch('tools.main.Client', return_value=mock_notion), \
-             patch('tools.main.create_google_calendar_event', return_value="✅ GCal OK") as mock_gcal:
+        with patch('tools.main.requests.post', return_value=mock_resp), \
+             patch('tools.main.create_google_calendar_event', return_value="GCal OK") as mock_gcal:
             result = create_notion_task("Task GCal", duration="2 Jam",
                                         date_str="2026-05-02", start_time="09:00")
 
@@ -309,16 +310,8 @@ class TestCreateNotionTask:
         assert "GCal OK" in result
 
     def test_handles_exception(self):
-        """
-        Exception saat pages.create() ditangani.
-        CATATAN BUG: Client() instantiation di create_notion_task() TIDAK di-wrap try/except.
-        Hanya notion.pages.create() yang di-wrap. Test ini mock pages.create agar sesuai behavior aslinya.
-        (Issue #7 di GEMINI.md)
-        """
-        mock_notion = MagicMock()
-        mock_notion.pages.create.side_effect = Exception("Notion API error")
-
-        with patch('tools.main.Client', return_value=mock_notion):
+        """Exception saat requests.post gagal ditangani dengan baik."""
+        with patch('tools.main.requests.post', side_effect=Exception("Notion API error")):
             result = create_notion_task("Bad Task")
 
         assert "Gagal" in result
