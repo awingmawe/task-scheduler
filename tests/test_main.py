@@ -321,6 +321,14 @@ class TestCreateNotionTask:
 
         assert "Gagal" in result
 
+    def test_create_notion_task_deduplication(self):
+        """Task tidak dibuat jika sudah ada (deduplikasi)."""
+        with patch('tools.main._task_exists_for_date', return_value=True):
+            result = create_notion_task("Task Duplikat", date_str="2026-05-02")
+        
+        assert "sudah ada" in result
+        assert "Skip create" in result
+
 
 # ======================================================
 # 8. TEST add_to_routine() / remove_from_routine()
@@ -335,12 +343,24 @@ class TestRoutineManagement:
         """Task baru berhasil ditambah ke rutinitas."""
         with patch('tools.main.get_master_routine_config',
                    return_value=self._setup_routine_mock()), \
-             patch('tools.main.update_master_routine_config') as mock_update:
+             patch('tools.main.update_master_routine_config') as mock_update, \
+             patch('tools.main.create_notion_task'):
             result = add_to_routine("Task Baru", "30 Menit")
 
         assert "✅" in result
         assert "Task Baru" in result
         mock_update.assert_called_once()
+
+    def test_add_to_routine_creates_task_for_today(self):
+        """Tambah rutinitas otomatis membuat task untuk hari ini."""
+        with patch('tools.main.get_master_routine_config', return_value=("page-abc", [])), \
+             patch('tools.main.update_master_routine_config'), \
+             patch('tools.main.create_notion_task', return_value="Task Created OK") as mock_create:
+            result = add_to_routine("Gym", "1 Jam")
+        
+        assert "✅" in result
+        assert "Task Created OK" in result
+        mock_create.assert_called_once()
 
     def test_add_duplicate_task(self):
         """Tidak bisa tambah task yang sudah ada."""

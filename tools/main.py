@@ -5,7 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import modal
 from fastapi import FastAPI, Request, BackgroundTasks
-from notion_client import Client
+
 import google.generativeai as genai
 import requests
 from google.oauth2.credentials import Credentials
@@ -14,7 +14,6 @@ from googleapiclient.discovery import build
 # Modal Image with dependencies
 image = modal.Image.debian_slim().pip_install(
     "fastapi",
-    "notion-client",
     "google-generativeai",
     "google-auth",
     "google-auth-oauthlib",
@@ -357,6 +356,9 @@ def create_notion_task(task_name: str, duration: str = "", date_str: str = "", s
     if duration:
         properties["Time"] = {"rich_text": [{"text": {"content": duration}}]}
 
+    if _task_exists_for_date(task_name, date_str):
+        return f"Task '{task_name}' sudah ada untuk {date_str}. Skip create."
+
     try:
         url = "https://api.notion.com/v1/pages"
         payload = {"parent": {"database_id": db_id}, "properties": properties}
@@ -405,7 +407,10 @@ def get_daily_report(date_str: str = "") -> str:
         
         response = requests.post(url, headers=_notion_headers(), json=payload)
         response.raise_for_status()
-        results = response.json().get("results", [])
+        resp_json = response.json()
+        results = resp_json.get("results", [])
+        
+        print(f"[REPORT DEBUG] Found {len(results)} pages for {date_str}")
         
         if not results:
             return f"Tidak ada task yang dijadwalkan untuk tanggal {date_str}."
@@ -679,6 +684,11 @@ def get_master_routine_config() -> tuple[str, list]:
                 }
             }
         ).json()
+        
+        if "id" not in page_resp:
+            print(f"[ERROR] Gagal membuat [CONFIG] MASTER ROUTINE: {page_resp}")
+            return None, default_routine
+
         return page_resp["id"], default_routine
 
     page = results[0]
@@ -706,7 +716,12 @@ def add_to_routine(task_name: str, duration: str = "") -> str:
                 return f"Aktivitas '{task_name}' sudah ada di rutinitas!"
         routine.append({"name": task_name, "duration": duration})
         update_master_routine_config(page_id, routine)
-        return f"✅ Sukses menambahkan '{task_name}' ke rutinitas harian!"
+        
+        # FIX: Juga buat task-nya untuk HARI INI jika belum ada
+        today = _today_wib()
+        create_res = create_notion_task(task_name, duration=duration, date_str=today)
+        
+        return f"✅ Sukses menambahkan '{task_name}' ke rutinitas harian! ({create_res})"
     except Exception as e:
         return f"Gagal menambahkan rutinitas: {str(e)}"
 
@@ -748,16 +763,22 @@ def get_memory_config(skip_cache: bool = False) -> tuple[str | None, dict]:
 
     if not results:
         # Buat halaman memory kosong pertama kali
-        notion = Client(auth=os.environ["NOTION_TOKEN"])
-        page = notion.pages.create(
-            parent={"database_id": db_id},
-            properties={
+        url = "https://api.notion.com/v1/pages"
+        payload = {
+            "parent": {"database_id": db_id},
+            "properties": {
                 "Name": {"title": [{"text": {"content": "[CONFIG] AI MEMORY"}}]},
                 "Notes / Summary": {"rich_text": [{"text": {"content": json.dumps({})}}]}
             }
-        )
-        _memory_cache.update({"data": {}, "page_id": page["id"], "expires_at": now + _MEMORY_TTL_SEC})
-        return page["id"], {}
+        }
+        resp = requests.post(url, headers=_notion_headers(), json=payload).json()
+        
+        if "id" not in resp:
+            print(f"[ERROR] Gagal membuat [CONFIG] AI MEMORY: {resp}")
+            return None, {}
+
+        _memory_cache.update({"data": {}, "page_id": resp["id"], "expires_at": now + _MEMORY_TTL_SEC})
+        return resp["id"], {}
 
     page = results[0]
     page_id = page["id"]
