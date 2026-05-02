@@ -20,7 +20,7 @@ import os
 import json
 import time
 import pytest
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock, AsyncMock, call
 from fastapi.testclient import TestClient
 
 
@@ -84,33 +84,38 @@ class TestNotionHeaders:
 class TestIsDuplicate:
     def test_first_call_not_duplicate(self):
         """Update ID baru bukan duplikat."""
-        # Reset dedup_store mock
-        sys.modules['modal'].Dict.from_name.return_value.get.return_value = None
-        result = _is_duplicate(99999)
+        sys.modules['modal'].Dict.from_name.return_value.get.aio = AsyncMock(return_value=None)
+        sys.modules['modal'].Dict.from_name.return_value.put.aio = AsyncMock()
+        import asyncio
+        result = asyncio.run(_is_duplicate(99999))
         assert result is False
 
     def test_second_call_within_ttl_is_duplicate(self):
         """Update ID yang sudah ada dalam TTL adalah duplikat."""
-        # Simulasikan bahwa key sudah tersimpan (timestamp sekarang)
         recent_ts = time.time()
-        sys.modules['modal'].Dict.from_name.return_value.get.return_value = recent_ts
-        result = _is_duplicate(99999)
+        sys.modules['modal'].Dict.from_name.return_value.get.aio = AsyncMock(return_value=recent_ts)
+        sys.modules['modal'].Dict.from_name.return_value.put.aio = AsyncMock()
+        import asyncio
+        result = asyncio.run(_is_duplicate(99999))
         assert result is True
 
     def test_expired_entry_not_duplicate(self):
         """Update ID yang sudah expired (> 120 detik) bukan duplikat."""
         old_ts = time.time() - 200  # 200 detik yang lalu
-        sys.modules['modal'].Dict.from_name.return_value.get.return_value = old_ts
-        result = _is_duplicate(99999)
+        sys.modules['modal'].Dict.from_name.return_value.get.aio = AsyncMock(return_value=old_ts)
+        sys.modules['modal'].Dict.from_name.return_value.put.aio = AsyncMock()
+        import asyncio
+        result = asyncio.run(_is_duplicate(99999))
         assert result is False
 
     def test_modal_dict_error_returns_false(self):
         """Jika modal.Dict error, jangan block request (return False)."""
-        sys.modules['modal'].Dict.from_name.return_value.get.side_effect = Exception("Modal error")
-        result = _is_duplicate(12345)
+        sys.modules['modal'].Dict.from_name.return_value.get.aio = AsyncMock(
+            side_effect=Exception("Modal error")
+        )
+        import asyncio
+        result = asyncio.run(_is_duplicate(12345))
         assert result is False
-        # Reset side_effect
-        sys.modules['modal'].Dict.from_name.return_value.get.side_effect = None
 
 
 # ======================================================
@@ -483,8 +488,7 @@ class TestWebhook:
                 "text": "Halo bot!"
             }
         }
-        # Mock dedup agar tidak bloking
-        with patch('tools.main._is_duplicate', return_value=False), \
+        with patch('tools.main._is_duplicate', new=AsyncMock(return_value=False)), \
              patch('tools.main._process_and_reply_sync'):
             resp = client.post("/webhook", json=payload)
 
@@ -502,7 +506,7 @@ class TestWebhook:
                 "text": "Duplikat!"
             }
         }
-        with patch('tools.main._is_duplicate', return_value=True) as mock_dedup:
+        with patch('tools.main._is_duplicate', new=AsyncMock(return_value=True)) as mock_dedup:
             resp = client.post("/webhook", json=payload)
 
         assert resp.status_code == 200
@@ -512,7 +516,7 @@ class TestWebhook:
     def test_webhook_no_message_returns_ok(self):
         """Payload tanpa key 'message' tetap return 200."""
         payload = {"update_id": 222222}
-        with patch('tools.main._is_duplicate', return_value=False):
+        with patch('tools.main._is_duplicate', new=AsyncMock(return_value=False)):
             resp = client.post("/webhook", json=payload)
 
         assert resp.status_code == 200
@@ -528,7 +532,7 @@ class TestWebhook:
                 "text": ""
             }
         }
-        with patch('tools.main._is_duplicate', return_value=False), \
+        with patch('tools.main._is_duplicate', new=AsyncMock(return_value=False)), \
              patch('tools.main._process_and_reply_sync') as mock_process:
             resp = client.post("/webhook", json=payload)
 

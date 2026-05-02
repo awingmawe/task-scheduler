@@ -34,15 +34,17 @@ web_app = FastAPI()
 dedup_store = modal.Dict.from_name("webhook-dedup", create_if_missing=True)
 _DEDUP_TTL_SEC = 120  # tolak duplicate dalam 2 menit
 
-def _is_duplicate(update_id: int) -> bool:
-    """Atomic check-and-set di modal.Dict. Return True jika sudah diproses."""
+async def _is_duplicate(update_id: int) -> bool:
+    """Async check-and-set di modal.Dict. Return True jika sudah diproses.
+    FIX Issue #1: Pakai .aio() variant agar tidak block async event loop.
+    """
     key = str(update_id)
     now = time.time()
     try:
-        stored = dedup_store.get(key)
+        stored = await dedup_store.get.aio(key)
         if stored and now - stored < _DEDUP_TTL_SEC:
             return True
-        dedup_store[key] = now
+        await dedup_store.put.aio(key, now)
         return False
     except Exception:
         # Kalau modal.Dict error, lanjut proses (safer than blocking)
@@ -926,7 +928,7 @@ async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
     # DEDUP: pakai modal.Dict yang dishare lintas semua container
     # Ini fix utama untuk masalah multi-reply ketika Telegram retry
     update_id = data.get("update_id")
-    if update_id and _is_duplicate(int(update_id)):
+    if update_id and await _is_duplicate(int(update_id)):
         print(f"[DEDUP] Duplicate update_id {update_id} blocked (cross-container).")
         return {"status": "ok"}
 
