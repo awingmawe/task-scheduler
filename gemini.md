@@ -55,3 +55,16 @@
 - 3-Layer Architecture (Architecture, Navigation, Tools)
 - Data-First Rule: Coding only begins once the "Payload" shape is confirmed.
 - Self-Annealing Loop
+
+## Development Rules
+- **Issue Logging:** Setiap kali ada bug/issue yang ditemukan dan diperbaiki, WAJIB update bagian "Known Issues & Fixes" di bawah.
+
+## Known Issues & Fixes
+
+### 7. `create_notion_task()` — `Client()` instantiation tidak di-wrap try/except
+- **Tanggal:** 2026-05-02
+- **Ditemukan oleh:** Unit test `TestCreateNotionTask.test_handles_exception`
+- **Gejala:** Jika `notion_client.Client()` throw exception (misal auth error), exception **tidak tertangkap** karena try/except hanya membungkus `notion.pages.create()`, bukan inisialisasi `Client()`.
+- **Penyebab:** `notion = Client(auth=os.environ["NOTION_TOKEN"])` berada di LUAR blok `try:`.
+- **Solusi yang disarankan:** Pindahkan `notion = Client(...)` ke dalam blok `try:` di `create_notion_task()`.
+- **Status:** Bug teridentifikasi via automated testing. Belum dipatch.
