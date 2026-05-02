@@ -305,8 +305,21 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=<MODAL_URL>/webhook"
 
 ### 7. `create_notion_task()` — `Client()` instantiation tidak di-wrap try/except
 - **Tanggal:** 2026-05-02
-- **Ditemukan oleh:** Unit test `TestCreateNotionTask.test_handles_exception`
-- **Gejala:** Jika `notion_client.Client()` throw exception (misal auth error), exception **tidak tertangkap** karena try/except hanya membungkus `notion.pages.create()`, bukan inisialisasi `Client()`.
-- **Penyebab:** `notion = Client(auth=os.environ["NOTION_TOKEN"])` berada di LUAR blok `try:`.
-- **Solusi yang disarankan:** Pindahkan `notion = Client(...)` ke dalam blok `try:` di `create_notion_task()`.
-- **Status:** Bug teridentifikasi via automated testing. Belum dipatch.
+- **Gejala:** Jika `notion_client.Client()` throw exception (misal auth error), exception **tidak tertangkap**.
+- **Penyebab:** `notion = Client(auth=...)` berada di LUAR blok `try:`.
+- **Solusi:** Refactor `create_notion_task()` ke raw `requests.post` (tidak perlu `Client` sama sekali).
+- **Status:** ✅ **FIXED** — 2026-05-02. `create_notion_task()` sekarang pakai raw requests.
+
+### 8. Timezone bug — task dibuat dengan date UTC bukan WIB
+- **Tanggal:** 2026-05-02
+- **Gejala:** `morning_slap` berjalan jam 22:00 UTC (= 05:00 WIB). Task dibuat dengan date UTC (misal `2026-05-01`), tapi user query setelah midnight UTC (jam 07:00+ WIB = setelah 00:00 UTC) mendapat date `2026-05-02` → tidak ketemu task.
+- **Penyebab:** Semua `datetime.datetime.now()` di Modal return UTC, bukan WIB.
+- **Solusi:** Buat helper `_today_wib()` yang pakai `datetime.timezone(timedelta(hours=7))`. Replace semua `datetime.datetime.now().strftime()` dengan `_today_wib()` di: `update_notion_task`, `mark_all_tasks`, `create_notion_task`, `get_daily_report`, `delete_notion_task`.
+- **Status:** ✅ **FIXED** — 2026-05-02.
+
+### 9. `morning_slap()` — task duplikat jika cron dijalankan >1x sehari
+- **Tanggal:** 2026-05-02
+- **Gejala:** Jika `morning_slap` dijalankan manual atau retry, task dari rutinitas dibuat dobel di Notion.
+- **Penyebab:** Tidak ada cek existing task sebelum `create_notion_task()` dipanggil.
+- **Solusi:** Tambah helper `_task_exists_for_date(task_name, date_str)` yang query Notion dengan filter `Name equals` + `Date equals`. Di `morning_slap`, skip task yang sudah ada dan log `[SKIP DEDUP]`.
+- **Status:** ✅ **FIXED** — 2026-05-02.
