@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 import requests
-import google.generativeai as genai
+from google import genai
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request as GoogleRequest
 from googleapiclient.discovery import build
@@ -23,11 +23,13 @@ def verify_telegram():
 
 def verify_gemini():
     print("Testing Gemini...")
-    genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
     try:
+        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
         # Use a more common model name for verification
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
-        response = model.generate_content("Reply with just the word 'OK'")
+        response = client.models.generate_content(
+            model='gemini-2.0-flash-exp', 
+            contents="Reply with just the word 'OK'"
+        )
         print(f"✅ Gemini OK: {response.text.strip()}")
     except Exception as e:
         print("❌ Gemini Error:", str(e))
@@ -39,7 +41,7 @@ def verify_notion():
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
-        "Notion-Version": "2022-06-28"
+        "Notion-Version": "2025-09-03"
     }
     try:
         url = f"https://api.notion.com/v1/databases/{db_id}"

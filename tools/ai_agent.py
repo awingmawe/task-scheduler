@@ -1,5 +1,6 @@
 import os
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from memory_tools import get_memory_config, save_memory, delete_memory
 from notion_tools import (
     update_notion_task,
@@ -19,20 +20,33 @@ def generate_ai_response(
     tools: list = None
 ) -> str:
     """Helper to generate AI response with primary model and fallback chain."""
-    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     
     if isinstance(contents, str):
         contents = [contents]
 
+    # Pre-process contents to handle audio_data dict if present
+    processed_contents = []
+    for item in contents:
+        if isinstance(item, dict) and "data" in item and "mime_type" in item:
+            processed_contents.append(
+                types.Part.from_bytes(data=item["data"], mime_type=item["mime_type"])
+            )
+        else:
+            processed_contents.append(item)
+
+    config = types.GenerateContentConfig(
+        tools=tools,
+        system_instruction=system_instruction
+    )
+
     # Primary model
     try:
-        model = genai.GenerativeModel(
-            'gemini-3.1-flash-lite-preview',
-            tools=tools,
-            system_instruction=system_instruction
+        response = client.models.generate_content(
+            model='gemini-3.1-flash-lite-preview',
+            contents=processed_contents,
+            config=config
         )
-        chat = model.start_chat(enable_automatic_function_calling=True if tools else False)
-        response = chat.send_message(contents)
         return response.text
     except Exception as e:
         print(f"Primary model (gemini-3.1-flash-lite-preview) error: {e}")
@@ -47,13 +61,11 @@ def generate_ai_response(
     for fallback_id in FALLBACK_MODELS:
         try:
             print(f"Trying fallback model: {fallback_id}")
-            fallback_model = genai.GenerativeModel(
-                fallback_id,
-                tools=tools,
-                system_instruction=system_instruction
+            fallback_response = client.models.generate_content(
+                model=fallback_id,
+                contents=processed_contents,
+                config=config
             )
-            fallback_chat = fallback_model.start_chat(enable_automatic_function_calling=True if tools else False)
-            fallback_response = fallback_model.generate_content(contents) if not tools else fallback_chat.send_message(contents)
             return fallback_response.text
         except Exception as fe:
             print(f"Fallback model {fallback_id} also failed: {fe}")

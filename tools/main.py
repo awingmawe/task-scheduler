@@ -16,7 +16,7 @@ from cron_jobs import (
 # Modal Image with dependencies and local tools
 image = modal.Image.debian_slim().pip_install(
     "fastapi",
-    "google-generativeai",
+    "google-genai",
     "google-auth",
     "google-auth-oauthlib",
     "google-api-python-client",

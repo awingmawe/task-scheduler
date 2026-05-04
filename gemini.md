@@ -350,7 +350,7 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=<MODAL_URL>/webhook"
 - **Gejala:** Muncul warning saat deploy/menjalankan bot bahwa library `google-generativeai` sudah deprecated.
 - **Penyebab:** Google telah merilis SDK baru `google-genai` dan menghentikan support untuk SDK lama.
 - **Solusi:** Migrasi codebase dari `import google.generativeai` ke library baru `google-genai`.
-- **Status:** Direncanakan (Backlog).
+- **Status:** ✅ **FIXED** — 2026-05-04. Codebase telah sepenuhnya dimigrasi ke SDK `google-genai`.
 
 ### 7. `create_notion_task()` — `Client()` instantiation tidak di-wrap try/except
 - **Tanggal:** 2026-05-02
