@@ -328,8 +328,15 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=<MODAL_URL>/webhook"
 - **Tanggal:** 2026-05-02
 - **Gejala:** `validation_error` saat query database Notion.
 - **Penyebab:** Header `Notion-Version: 2022-06-28` sudah outdated.
-- **Solusi:** Update semua `Notion-Version` header ke `"2022-06-28"` atau yang terbaru.
-- **Status:** Teridentifikasi.
+- **Solusi:** Update semua `Notion-Version` header ke `"2025-09-03"`.
+- **Status:** ✅ **FIXED** — 2026-05-02.
+
+### 11. `ModuleNotFoundError: No module named 'requests'` saat CI/CD (GitHub Actions)
+- **Tanggal:** 2026-05-04
+- **Gejala:** GitHub Action job `deploy` gagal dengan error `ModuleNotFoundError: No module named 'requests'`.
+- **Penyebab:** Saat menjalankan `modal deploy tools/main.py`, CLI Modal mencoba meng-import script `main.py` di environment runner (GitHub Actions) untuk memvalidasi/mencari objek app. Karena job `deploy` di `cd.yml` hanya menginstall `modal` dan tidak menginstall dependensi project (`requests`, dll), import gagal.
+- **Solusi:** Update `.github/workflows/cd.yml` untuk menginstall `requirements.txt` di dalam job `deploy` sebelum menjalankan perintah `modal deploy`.
+- **Status:** ✅ **FIXED** — 2026-05-04.
 
 ### 7. `create_notion_task()` — `Client()` instantiation tidak di-wrap try/except
 - **Tanggal:** 2026-05-02
