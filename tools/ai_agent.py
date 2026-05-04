@@ -1,6 +1,8 @@
 import os
+import datetime
 from google import genai
 from google.genai import types
+from config import _today_wib
 from memory_tools import get_memory_config, save_memory, delete_memory
 from notion_tools import (
     update_notion_task,
@@ -74,6 +76,7 @@ def generate_ai_response(
     return "Waduh, semua model AI lagi bermasalah nih! Coba lagi sebentar ya 🙏"
 
 def process_with_ai(user_input: str, audio_data: dict = None) -> str:
+    """Entry point: ambil memori, set context waktu, panggil Gemini."""
     # Load AI memory dari Notion untuk dijadikan konteks persisten
     _, memory = get_memory_config()
     memory_context = ""
@@ -81,7 +84,15 @@ def process_with_ai(user_input: str, audio_data: dict = None) -> str:
         memory_lines = "\n".join([f"- {k}: {v}" for k, v in memory.items()])
         memory_context = f"\n\n[MEMORI TENTANG USER]\n{memory_lines}\n"
 
+    # CRITICAL FIX: Calculate today and now_time INSIDE the function 
+    # to avoid stale date/time context when container is recycled.
+    wib_tz = datetime.timezone(datetime.timedelta(hours=7))
+    now_wib = datetime.datetime.now(wib_tz)
+    today = now_wib.strftime("%Y-%m-%d")
+    now_time = now_wib.strftime("%H:%M")
+    
     system_instruction = (
+        f"Konteks Waktu: Hari ini adalah {today}, Jam {now_time} WIB.\n\n"
         "Kamu adalah asisten/teman akrab yang santai dan ceplas-ceplos. "
         "Tugasmu membantu mengelola jadwal dan tugas di Notion.\n"
         "ATURAN PALING PENTING: Jangan pernah bilang 'berhasil' sebelum BENAR-BENAR memanggil tool-nya!\n"

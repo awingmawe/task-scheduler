@@ -80,31 +80,48 @@ def _get_all_streaks_for_yesterday(date_str: str) -> dict:
         return {}
 
 def update_notion_task(task_name: str, status: bool, summary: str = "") -> str:
-    """Update status dan catatan sebuah task di Notion untuk hari ini."""
+    """Update status dan catatan sebuah task di Notion untuk hari ini (dengan grace period dini hari)."""
     db_id = os.environ["NOTION_DB_ID"]
-    today_str = _today_wib()
+    
+    # Timezone WIB
+    wib_tz = datetime.timezone(datetime.timedelta(hours=7))
+    now_wib = datetime.datetime.now(wib_tz)
+    today_str = now_wib.strftime("%Y-%m-%d")
 
-    try:
+    def _query_notion(date_val: str):
         url = f"https://api.notion.com/v1/databases/{db_id}/query"
         payload = {
             "filter": {
                 "and": [
-                    {
-                        "property": "Name",
-                        "title": {"contains": task_name}
-                    },
-                    {
-                        "property": "Date",
-                        "date": {"equals": today_str}
-                    }
+                    {"property": "Name", "title": {"contains": task_name}},
+                    {"property": "Date", "date": {"equals": date_val}}
                 ]
             }
         }
-        resp = requests.post(url, headers=_notion_headers(), json=payload).json()
-        results = resp.get("results", [])
+        resp = requests.post(url, headers=_notion_headers(), json=payload)
+        return resp
+
+    try:
+        # 1. Coba hari ini
+        resp = _query_notion(today_str)
+        if resp.status_code != 200:
+            return f"❌ Error Notion API ({resp.status_code}): {resp.text}"
+            
+        results = resp.json().get("results", [])
+
+        # 2. Grace Period: Jika tidak ketemu dan masih dini hari (< 04:00 WIB), coba kemarin
+        target_date = today_str
+        if not results and now_wib.hour < 4:
+            yesterday_str = (now_wib - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+            print(f"[GRACE PERIOD] Task '{task_name}' not found for {today_str}. Checking {yesterday_str}...")
+            resp = _query_notion(yesterday_str)
+            if resp.status_code == 200:
+                results = resp.json().get("results", [])
+                if results:
+                    target_date = yesterday_str
 
         if not results:
-            return f"Task '{task_name}' untuk hari ini ({today_str}) tidak ditemukan."
+            return f"Task '{task_name}' untuk {today_str} tidak ditemukan. Pastikan nama task sesuai atau cek di Notion."
 
         page_id = results[0]["id"]
         update_url = f"https://api.notion.com/v1/pages/{page_id}"
@@ -134,21 +151,45 @@ def update_notion_task(task_name: str, status: bool, summary: str = "") -> str:
 def mark_all_tasks(status: bool, date_str: str = "") -> str:
     """Update status SEMUA task sekaligus untuk hari ini (atau tanggal tertentu)."""
     db_id = os.environ["NOTION_DB_ID"]
-    if not date_str:
-        date_str = _today_wib()
+    
+    # Timezone WIB
+    wib_tz = datetime.timezone(datetime.timedelta(hours=7))
+    now_wib = datetime.datetime.now(wib_tz)
 
-    try:
+    if not date_str:
+        date_str = now_wib.strftime("%Y-%m-%d")
+        is_auto_date = True
+    else:
+        is_auto_date = False
+
+    def _fetch_all(d_str):
         url = f"https://api.notion.com/v1/databases/{db_id}/query"
         payload = {
             "filter": {
                 "and": [
-                    {"property": "Date", "date": {"equals": date_str}},
+                    {"property": "Date", "date": {"equals": d_str}},
                     {"property": "Name", "title": {"does_not_contain": "[CONFIG]"}}
                 ]
             }
         }
-        resp = requests.post(url, headers=_notion_headers(), json=payload).json()
-        results = resp.get("results", [])
+        return requests.post(url, headers=_notion_headers(), json=payload)
+
+    try:
+        resp = _fetch_all(date_str)
+        if resp.status_code != 200:
+            return f"❌ Error Notion API ({resp.status_code}): {resp.text}"
+            
+        results = resp.json().get("results", [])
+
+        # Grace Period: Jika tgl hari ini kosong & masih dini hari, coba kemarin
+        if not results and is_auto_date and now_wib.hour < 4:
+            yesterday_str = (now_wib - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+            print(f"[MARK ALL GRACE] No tasks for {date_str}, checking {yesterday_str}...")
+            resp = _fetch_all(yesterday_str)
+            if resp.status_code == 200:
+                results = resp.json().get("results", [])
+                if results:
+                    date_str = yesterday_str
 
         if not results:
             return f"Tidak ada task untuk tanggal {date_str}."
@@ -241,23 +282,49 @@ def create_notion_task(task_name: str, duration: str = "", date_str: str = "", s
         return f"Gagal membuat task: {str(e)}"
 
 def delete_notion_task(task_name: str, date_str: str = "") -> str:
-    """Hapus sebuah task dari Notion berdasarkan nama dan tanggal."""
+    """Hapus sebuah task dari Notion berdasarkan nama dan tanggal (dengan grace period)."""
     db_id = os.environ["NOTION_DB_ID"]
+    
+    # Timezone WIB
+    wib_tz = datetime.timezone(datetime.timedelta(hours=7))
+    now_wib = datetime.datetime.now(wib_tz)
+
     if not date_str:
-        date_str = _today_wib()
-    try:
+        date_str = now_wib.strftime("%Y-%m-%d")
+        is_auto_date = True
+    else:
+        is_auto_date = False
+
+    def _query(d_str):
         url = f"https://api.notion.com/v1/databases/{db_id}/query"
         payload = {
             "filter": {
                 "and": [
                     {"property": "Name", "title": {"contains": task_name}},
-                    {"property": "Date", "date": {"equals": date_str}},
+                    {"property": "Date", "date": {"equals": d_str}},
                     {"property": "Name", "title": {"does_not_contain": "[CONFIG]"}}
                 ]
             }
         }
-        resp = requests.post(url, headers=_notion_headers(), json=payload).json()
-        results = resp.get("results", [])
+        return requests.post(url, headers=_notion_headers(), json=payload)
+
+    try:
+        resp = _query(date_str)
+        if resp.status_code != 200:
+            return f"❌ Error Notion API ({resp.status_code}): {resp.text}"
+            
+        results = resp.json().get("results", [])
+
+        # Grace Period: Jika tidak ketemu & dini hari, coba kemarin
+        if not results and is_auto_date and now_wib.hour < 4:
+            yesterday_str = (now_wib - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+            print(f"[DELETE GRACE] Task '{task_name}' not found for {date_str}. Checking {yesterday_str}...")
+            resp = _query(yesterday_str)
+            if resp.status_code == 200:
+                results = resp.json().get("results", [])
+                if results:
+                    date_str = yesterday_str
+
         if not results:
             return f"Task '{task_name}' untuk tanggal {date_str} tidak ditemukan."
         page_id = results[0]["id"]

@@ -12,6 +12,7 @@ class TestReports:
     def test_get_daily_report_format(self):
         """Report harus punya section selesai dan belum."""
         mock_resp = MagicMock()
+        mock_resp.status_code = 200
         mock_resp.json.return_value = {
             "results": [
                 {
@@ -41,6 +42,7 @@ class TestReports:
     def test_get_weekly_report(self):
         """Weekly report mengembalikan string yang berisi ringkasan mingguan."""
         mock_resp = MagicMock()
+        mock_resp.status_code = 200
         mock_resp.json.return_value = {
             "results": [
                 {
@@ -61,6 +63,7 @@ class TestReports:
     def test_get_monthly_report(self):
         """Monthly report mengembalikan string yang berisi ringkasan bulanan."""
         mock_resp = MagicMock()
+        mock_resp.status_code = 200
         mock_resp.json.return_value = {
             "results": [
                 {
