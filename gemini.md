@@ -340,10 +340,10 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=<MODAL_URL>/webhook"
 
 ### 12. `Token missing. Could not authenticate client.` saat CI/CD
 - **Tanggal:** 2026-05-04
-- **Gejala:** GitHub Action job `deploy` gagal saat menjalankan `modal deploy` dengan pesan error "Token missing".
-- **Penyebab:** Environment runner GitHub Actions tidak memiliki kredensial Modal (token ID & secret) yang valid.
-- **Solusi:** User harus menambahkan `MODAL_TOKEN_ID` dan `MODAL_TOKEN_SECRET` ke dalam **GitHub Repository Secrets** (Settings > Secrets and variables > Actions). Nilai token bisa didapatkan dengan menjalankan `modal token new` di terminal lokal.
-- **Status:** Menunggu konfigurasi user.
+- **Gejala:** GitHub Action job `deploy` gagal saat menjalankan `modal deploy` dengan pesan error "Token missing" atau "Token validation failed".
+- **Penyebab:** Environment runner GitHub Actions tidak memiliki kredensial Modal (token ID & secret) yang valid atau format pengisian di GitHub Secrets salah (termasuk tanda petik/prefix).
+- **Solusi:** Ambil token dari `~/.modal.toml` (lokal) atau jalankan `modal token new`. Masukkan ke GitHub Repository Secrets (`MODAL_TOKEN_ID` & `MODAL_TOKEN_SECRET`) **TANPA tanda petik** dan **TANPA prefix** `token_id =`.
+- **Status:** ✅ **FIXED** — 2026-05-04.
 
 ### 13. `FutureWarning: All support for the google.generativeai package has ended`
 - **Tanggal:** 2026-05-04

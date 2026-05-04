@@ -1,56 +1,65 @@
-# 🚀 Notion AI Task Scheduler
+# 🚀 Notion AI Task Scheduler — V2 (Daily Rows)
 
-Asisten pribadi cerdas berbasis AI yang mengelola jadwal harian lo di Notion, Google Calendar, dan Telegram. Gak cuma nyatet, bot ini juga bisa ngomel kalo lo males! 😂
+Asisten pribadi cerdas berbasis AI yang mengelola jadwal harian lo di Notion, Google Calendar, dan Telegram. Bot ini bukan cuma sekadar *logger*, tapi "manajer" harian yang bakal bikinin list tugas tiap pagi dan nagih progresnya tiap sore!
 
 ## ✨ Fitur Utama
 
-- **🧠 AI-Powered Task Management**: Pake Gemini (2.5-Flash & Fallbacks) buat ngerti bahasa santai lo.
-- **📅 Google Calendar Sync**: Otomatis bikin event di kalender kalo lo sebut jam spesifik.
-- **🔄 Auto-Daily Routine**: Jam 5 pagi otomatis bikinin target harian lo di Notion biar gak lupa.
-- **🗣️ Voice Note Support**: Males ngetik? Kirim VN aja, AI bakal transkripsi dan jalanin perintah lo.
-- **⚡ Parallel Execution**: Update banyak task di Notion sekaligus dalam hitungan detik.
-- **📝 AI Memory System**: Bot bisa "ingat" fakta atau preferensi lo (disimpen langsung di Notion).
-- **💥 Motivational Reminders ("Slap")**: Notifikasi berkala (Pagi, Siang, Sore, Malam) buat mastiin lo gak cuma rebahan.
+- **🧠 Advanced AI Agent**: Menggunakan **Gemini 3.1 Flash Lite** dengan sistem *function-calling* yang presisi. Bisa ngerti perintah bahasa manusia (VN atau teks).
+- **🔄 Auto-Generation (05:00 WIB)**: Tiap pagi otomatis narik daftar rutinitas dari **Master Routine** dan bikinin baris tugas individu di Notion.
+- **📅 Google Calendar Sync**: Bikin event kalender otomatis lewat chat. Gak perlu buka app GCal lagi.
+- **⚡ Individual Task System**: Satu aktivitas, satu baris di Notion. Status tinggal centang, lebih rapi dan gampang di-filter.
+- **🗣️ Voice Note Transcription**: Males ngetik? Kirim VN, AI transkripsi instruksinya, langsung eksekusi tool Notion/GCal.
+- **💥 Motivational Slaps**: Pengingat berkala (Pagi, Siang, Sore, Malam) dengan gaya bahasa "tamparan" motivasi keras khas pertemanan akrab.
+- **📝 AI Memory (Persistent)**: Bot punya memori buat simpan fakta tentang lo (misal: "Gue lagi diet rendah gula") yang disimpen aman di Notion.
 
 ## 🛠️ Tech Stack
 
-- **Framework**: [Modal](https://modal.com/) (Serverless & Cron)
-- **API**: [FastAPI](https://fastapi.tiangolo.com/)
-- **Database**: [Notion API](https://developers.notion.com/)
-- **LLM**: [Google Gemini API](https://aistudio.google.com/)
-- **Integration**: Telegram Bot API & Google Calendar API
+- **Framework**: [Modal](https://modal.com/) (Serverless Cloud & Cron Jobs)
+- **Engine**: [FastAPI](https://fastapi.tiangolo.com/) & [Python 3.12+](https://www.python.org/)
+- **LLM**: Google Gemini API (`gemini-3.1-flash-lite-preview`)
+- **Database**: Notion API (Direct Integration)
+- **Messaging**: Telegram Bot API
 
-## 🚀 Cara Install
+## 📂 Struktur Project (Modular)
 
-1.  **Clone Repo**:
-    ```bash
-    git clone <url-repo-lo>
-    cd task-scheduler
+```
+task-scheduler/
+├── tools/
+│   ├── main.py            # Entry point (Webhook & Modal App)
+│   ├── ai_agent.py        # Logika otak AI & Fallback Chain
+│   ├── notion_tools.py    # CRUD Operasi ke Notion
+│   ├── gcal_tools.py      # Integrasi Google Calendar
+│   ├── memory_tools.py    # Sistem Memori AI (Key-Value)
+│   ├── reports.py         # Generator laporan harian & progres
+│   ├── telegram_tools.py  # Utility pengiriman pesan Telegram
+│   ├── cron_jobs.py       # Logic scheduled tasks (Slaps)
+│   └── setup_notion_db.py # Script inisialisasi schema DB
+├── tests/                 # Unit testing suite (Pytest)
+└── gemini.md              # Project Constitution (SOP AI)
+```
+
+## 🚀 Setup & Deployment
+
+1.  **Inisialisasi Database**:
+    Jalankan script setup buat bikin database Notion yang sesuai schema:
+    ```powershell
+    python tools/setup_notion_db.py
     ```
 
-2.  **Setup Environment**:
-    Buat file `.env` (jangan di-push!) dan isi:
-    ```env
-    NOTION_TOKEN=...
-    NOTION_DB_ID=...
-    TELEGRAM_TOKEN=...
-    GEMINI_API_KEY=...
-    GCAL_CLIENT_ID=...
-    GCAL_CLIENT_SECRET=...
-    GCAL_REFRESH_TOKEN=...
+2.  **Setup Secrets di Modal**:
+    Pastikan lo udah punya Modal account, lalu buat secret group `my-notion-secrets`:
+    ```bash
+    modal secret create my-notion-secrets \
+      NOTION_TOKEN=... \
+      NOTION_DB_ID=... \
+      TELEGRAM_TOKEN=... \
+      GEMINI_API_KEY=...
     ```
 
-3.  **Deploy ke Modal**:
-    ```bash
+3.  **Deploy**:
+    ```powershell
     modal deploy tools/main.py
     ```
 
-## 📂 Struktur Folder
-
-- `tools/main.py`: Core logic (AI Agent, Tools, Webhook, Cron).
-- `tools/setup_gcal_auth.py`: Script buat dapetin refresh token Google.
-- `tools/setup_notion_db.py`: Inisialisasi database Notion.
-- `architecture/`: Dokumentasi sistem & SOP.
-
 ---
-*Dibuat dengan ❤️ buat lo yang pengen produktif tapi butuh ditampol biar gerak.*
+*Dibuat dengan ❤️ untuk lo yang pengen mimpi lo tercapai, bukan cuma jadi rencana.*
