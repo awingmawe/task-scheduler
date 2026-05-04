@@ -24,22 +24,44 @@ def get_daily_report(date_str: str = "") -> str:
     """Gets a report of all tasks scheduled for a specific date, highlighting uncompleted ones."""
     db_id = os.environ["NOTION_DB_ID"]
     
+    # Timezone WIB
+    wib_tz = datetime.timezone(datetime.timedelta(hours=7))
+    now_wib = datetime.datetime.now(wib_tz)
+
     if not date_str:
-        date_str = _today_wib()
+        date_str = now_wib.strftime("%Y-%m-%d")
+        is_auto_date = True
+    else:
+        is_auto_date = False
         
     try:
-        url = f"https://api.notion.com/v1/databases/{db_id}/query"
-        payload = {
-            "filter": {
-                "property": "Date",
-                "date": {"equals": date_str}
+        def _fetch(d_str):
+            url = f"https://api.notion.com/v1/databases/{db_id}/query"
+            payload = {
+                "filter": {
+                    "property": "Date",
+                    "date": {"equals": d_str}
+                }
             }
-        }
-        
-        response = requests.post(url, headers=_notion_headers(), json=payload)
-        response.raise_for_status()
+            return requests.post(url, headers=_notion_headers(), json=payload)
+
+        response = _fetch(date_str)
+        if response.status_code != 200:
+            print(f"[REPORT ERROR] Notion API {response.status_code}: {response.text}")
+            return f"❌ Gagal mengambil report Notion ({response.status_code}): {response.text}"
+            
         resp_json = response.json()
         results = resp_json.get("results", [])
+
+        # Grace Period: Jika tgl hari ini kosong & masih dini hari, coba kemarin
+        if not results and is_auto_date and now_wib.hour < 4:
+            yesterday_str = (now_wib - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+            print(f"[REPORT GRACE] No tasks for {date_str}, checking {yesterday_str}...")
+            response = _fetch(yesterday_str)
+            if response.status_code == 200:
+                results = response.json().get("results", [])
+                if results:
+                    date_str = yesterday_str
         
         print(f"[REPORT DEBUG] Found {len(results)} pages for {date_str}")
         

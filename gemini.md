@@ -242,7 +242,7 @@ python -m pytest tests/ -v
 python -m pytest tests/ -v --html=test_report.html --self-contained-html
 ```
 
-**Status test saat ini:** 36/36 PASSED ✅  
+**Status test saat ini:** 18/18 PASSED ✅  
 **Jalankan test sebelum setiap `modal deploy`**
 
 ---
@@ -352,6 +352,13 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=<MODAL_URL>/webhook"
 - **Solusi:** Migrasi codebase dari `import google.generativeai` ke library baru `google-genai`.
 - **Status:** ✅ **FIXED** — 2026-05-04. Codebase telah sepenuhnya dimigrasi ke SDK `google-genai`.
 
+### 14. `API Error 400: Bad Request` saat query database Notion via Cron
+- **Tanggal:** 2026-05-04
+- **Gejala:** Cron jobs (morning_slap, etc.) gagal dengan error 400 saat memanggil `get_daily_report()`.
+- **Penyebab:** Kemungkinan payload filter query tidak sesuai dengan schema Notion DB atau `Notion-Version` header tidak konsisten.
+- **Solusi:** Sedang diinvestigasi. Lacak di [GitHub Issue #11](https://github.com/awingmawe/task-scheduler/issues/11).
+- **Status:** 🔴 **OPEN**
+
 ### 7. `create_notion_task()` — `Client()` instantiation tidak di-wrap try/except
 - **Tanggal:** 2026-05-02
 - **Gejala:** Jika `notion_client.Client()` throw exception (misal auth error), exception **tidak tertangkap**.
@@ -379,3 +386,9 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=<MODAL_URL>/webhook"
 - **Penyebab:** Desain awal yang menggabungkan triggers, tools, dan AI agent dalam satu file.
 - **Solusi:** Refactor codebase menjadi modular (`ai_agent.py`, `notion_tools.py`, `cron_jobs.py`, dll) dan split `test_main.py` menjadi specialized test files sesuai modulnya. Centralized AI fallback logic dalam `generate_ai_response`.
 - **Status:** ✅ **FIXED** — 2026-05-02.
+### 15. `Task not found` — Bug timing di malam hari/dini hari
+- **Tanggal:** 2026-05-04
+- **Gejala:** AI melaporkan "task tidak ditemukan" saat user mencoba update task di malam hari (sebelum tidur) atau dini hari.
+- **Penyebab:** (1) Context `today` di AI agent stale karena container reuse. (2) Database query hanya mencari tanggal hari kalender saat ini, padahal secara logis user masih mengerjakan task "kemarin".
+- **Solusi:** (1) Pindahkan kalkulasi `today` ke dalam fungsi `process_with_ai` agar selalu fresh. (2) Implementasi **Grace Period** hingga jam 04:00 WIB di `notion_tools.py` dan `reports.py`; jika task hari ini tidak ketemu, otomatis cari task kemarin.
+- **Status:** ✅ **FIXED** — 2026-05-04.

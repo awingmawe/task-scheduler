@@ -37,7 +37,7 @@ def _notion_headers() -> dict:
     return {
         "Authorization": f"Bearer {os.environ['NOTION_TOKEN']}",
         "Content-Type": "application/json",
-        "Notion-Version": "2025-09-03"
+        "Notion-Version": "2022-06-28"
     }
 
 WIB = datetime.timezone(datetime.timedelta(hours=7))

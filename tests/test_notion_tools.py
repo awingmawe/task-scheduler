@@ -30,8 +30,10 @@ class TestNotionTools:
     def test_update_notion_task_success(self):
         """Task ditemukan, status dan summary diupdate."""
         mock_response = MagicMock()
+        mock_response.status_code = 200
         mock_response.json.return_value = self._make_notion_results()
         mock_patch = MagicMock()
+        mock_patch.status_code = 200
 
         with patch('tools.notion_tools.requests.post', return_value=mock_response), \
              patch('tools.notion_tools.requests.patch', return_value=mock_patch):
@@ -43,15 +45,18 @@ class TestNotionTools:
     def test_mark_all_tasks_success(self):
         """Semua task berhasil diupdate jadi selesai."""
         mock_resp = MagicMock()
+        mock_resp.status_code = 200
         mock_resp.json.return_value = {
             "results": [
                 {"id": "p1", "properties": {"Name": {"title": [{"text": {"content": "Task A"}}]}}},
                 {"id": "p2", "properties": {"Name": {"title": [{"text": {"content": "Task B"}}]}}},
             ]
         }
+        mock_patch = MagicMock()
+        mock_patch.status_code = 200
 
         with patch('tools.notion_tools.requests.post', return_value=mock_resp), \
-             patch('tools.notion_tools.requests.patch', return_value=MagicMock()):
+             patch('tools.notion_tools.requests.patch', return_value=mock_patch):
             result = mark_all_tasks(True)
 
         assert "✅" in result
@@ -60,6 +65,7 @@ class TestNotionTools:
     def test_create_notion_task_success(self):
         """Task baru berhasil dibuat di Notion."""
         mock_resp = MagicMock()
+        mock_resp.status_code = 200
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {"id": "new-page-id"}
 
@@ -73,10 +79,13 @@ class TestNotionTools:
     def test_delete_notion_task_success(self):
         """Task berhasil dihapus (archived)."""
         mock_resp = MagicMock()
+        mock_resp.status_code = 200
         mock_resp.json.return_value = self._make_notion_results()
+        mock_patch = MagicMock()
+        mock_patch.status_code = 200
 
         with patch('tools.notion_tools.requests.post', return_value=mock_resp), \
-             patch('tools.notion_tools.requests.patch', return_value=MagicMock()):
+             patch('tools.notion_tools.requests.patch', return_value=mock_patch):
             result = delete_notion_task("Test Task", "2026-05-02")
 
         assert "berhasil dihapus" in result
