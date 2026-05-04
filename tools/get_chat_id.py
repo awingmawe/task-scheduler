@@ -2,7 +2,7 @@ import requests
 import json
 import sys
 
-TOKEN = '8344404871:AAH5myLgB_MHqMKbGeP01Fws1GpFMjqHs24'
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
 upd_resp = requests.get(f'https://api.telegram.org/bot{TOKEN}/getUpdates?limit=10&timeout=20')
 data = upd_resp.json()
 
