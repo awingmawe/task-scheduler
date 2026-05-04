@@ -247,6 +247,21 @@ python -m pytest tests/ -v --html=test_report.html --self-contained-html
 
 ---
 
+## 🚀 CI/CD (GitHub Actions)
+
+Project ini menggunakan GitHub Actions untuk testing otomatis dan deployment ke Modal.
+
+| Workflow | Trigger | Aksi |
+|----------|---------|------|
+| `CI` | Push ke `main` & `feature/*`, PR ke `main` | Menjalankan `pytest` |
+| `CD` | Push ke `main` | Deploy ke Modal (`modal deploy`) |
+
+**GitHub Secrets yang diperlukan:**
+- `MODAL_TOKEN_ID`: Diambil dari `modal token new` (dijalankan lokal)
+- `MODAL_TOKEN_SECRET`: Diambil dari `modal token new`
+
+---
+
 ## 🚀 Deployment
 
 ```powershell
