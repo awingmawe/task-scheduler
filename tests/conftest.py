@@ -29,10 +29,17 @@ mock_modal.Cron = MagicMock()
 mock_modal.asgi_app = lambda: lambda f: f
 sys.modules['modal'] = mock_modal
 
-# Mock google.generativeai
+# Mock google modules
+mock_google = MagicMock()
 mock_genai = MagicMock()
-sys.modules['google.generativeai'] = mock_genai
-sys.modules['google'] = MagicMock()
+mock_genai_types = MagicMock()
+mock_google.genai = mock_genai
+mock_genai.types = mock_genai_types
+sys.modules['google'] = mock_google
+sys.modules['google.genai'] = mock_genai
+sys.modules['google.genai.types'] = mock_genai_types
+
+# Support for other google libraries
 sys.modules['google.oauth2'] = MagicMock()
 sys.modules['google.oauth2.credentials'] = MagicMock()
 sys.modules['google.auth'] = MagicMock()

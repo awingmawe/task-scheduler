@@ -15,7 +15,7 @@ PARENT_PAGE_ID = "354945edf4a98001948ed7bc9f21684f"  # MENUJU_1T page
 headers = {
     "Authorization": f"Bearer {NOTION_TOKEN}",
     "Content-Type": "application/json",
-    "Notion-Version": "2022-06-28"
+    "Notion-Version": "2025-09-03"
 }
 
 payload = {
