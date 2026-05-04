@@ -338,6 +338,20 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=<MODAL_URL>/webhook"
 - **Solusi:** Update `.github/workflows/cd.yml` untuk menginstall `requirements.txt` di dalam job `deploy` sebelum menjalankan perintah `modal deploy`.
 - **Status:** ✅ **FIXED** — 2026-05-04.
 
+### 12. `Token missing. Could not authenticate client.` saat CI/CD
+- **Tanggal:** 2026-05-04
+- **Gejala:** GitHub Action job `deploy` gagal saat menjalankan `modal deploy` dengan pesan error "Token missing".
+- **Penyebab:** Environment runner GitHub Actions tidak memiliki kredensial Modal (token ID & secret) yang valid.
+- **Solusi:** User harus menambahkan `MODAL_TOKEN_ID` dan `MODAL_TOKEN_SECRET` ke dalam **GitHub Repository Secrets** (Settings > Secrets and variables > Actions). Nilai token bisa didapatkan dengan menjalankan `modal token new` di terminal lokal.
+- **Status:** Menunggu konfigurasi user.
+
+### 13. `FutureWarning: All support for the google.generativeai package has ended`
+- **Tanggal:** 2026-05-04
+- **Gejala:** Muncul warning saat deploy/menjalankan bot bahwa library `google-generativeai` sudah deprecated.
+- **Penyebab:** Google telah merilis SDK baru `google-genai` dan menghentikan support untuk SDK lama.
+- **Solusi:** Migrasi codebase dari `import google.generativeai` ke library baru `google-genai`.
+- **Status:** Direncanakan (Backlog).
+
 ### 7. `create_notion_task()` — `Client()` instantiation tidak di-wrap try/except
 - **Tanggal:** 2026-05-02
 - **Gejala:** Jika `notion_client.Client()` throw exception (misal auth error), exception **tidak tertangkap**.
