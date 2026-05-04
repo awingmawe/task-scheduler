@@ -8,6 +8,9 @@ import sys
 import os
 from unittest.mock import MagicMock, patch
 
+# Tambahkan folder tools ke sys.path supaya local imports (tanpa 'tools.') bisa jalan saat test
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../tools'))
+
 # -------------------------------------------------------
 # Mock semua external modules SEBELUM import main.py
 # Ini penting karena main.py import modal, google.generativeai, dll

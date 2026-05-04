@@ -53,7 +53,15 @@ Ini adalah **Telegram bot** yang terhubung ke **Notion** sebagai database task h
 ### Core (deployed ke Modal)
 | File | Keterangan |
 |------|------------|
-| `tools/main.py` | **Semua logic ada di sini.** 3 layer sekaligus: FastAPI webhook, Gemini agent, Notion/GCal/Memory tools, cron jobs. Deploy: `modal deploy tools/main.py` |
+| `tools/main.py` | **Entry point.** FastAPI webhook handler dan orkestrasi utama. |
+| `tools/ai_agent.py` | **Otak AI.** Logic Gemini agent, function calling, dan centralized fallback chain. |
+| `tools/notion_tools.py` | **Notion Tool.** Semua interaksi Notion API (tasks, routine, status). |
+| `tools/gcal_tools.py` | **Calendar Tool.** Interaksi Google Calendar API. |
+| `tools/cron_jobs.py` | **Scheduled Tasks.** Logic untuk morning, noon, afternoon, dan evening slaps. |
+| `tools/reports.py` | **Reporting.** Generator laporan harian dan progres habit. |
+| `tools/memory_tools.py` | **AI Memory.** CRUD memory AI yang disimpan di Notion. |
+| `tools/config.py` | **Configuration.** Centralized environment variables dan Modal app setup. |
+| `tools/telegram_tools.py` | **Messaging.** Utility untuk kirim pesan ke Telegram. |
 
 ### Setup Scripts (jalankan sekali secara lokal)
 | File | Keterangan |
@@ -67,9 +75,12 @@ Ini adalah **Telegram bot** yang terhubung ke **Notion** sebagai database task h
 ### Testing
 | File | Keterangan |
 |------|------------|
-| `tests/conftest.py` | Fixtures & mocking semua external deps |
-| `tests/test_main.py` | 36 unit tests — **selalu jalankan sebelum deploy** |
-| `pyproject.toml` | Pytest config |
+| `tests/conftest.py` | Fixtures & mocking semua external deps. |
+| `tests/test_webhook.py` | Test untuk FastAPI webhook dan AI orchestration. |
+| `tests/test_notion_tools.py` | Test untuk semua tool Notion (CRUD tasks, etc). |
+| `tests/test_reports.py` | Test untuk logic peritungan report dan habit. |
+| `tests/test_cron_jobs.py` | Test untuk eksekusi cron jobs (morning/evening slaps). |
+| `pyproject.toml` | Pytest config. |
 
 ### Config
 | File | Keterangan |
@@ -98,6 +109,8 @@ Ini adalah **Telegram bot** yang terhubung ke **Notion** sebagai database task h
 ---
 
 ## 🤖 Model AI & Fallback Chain
+
+Logic AI dipusatkan di `tools/ai_agent.py` menggunakan fungsi `generate_ai_response()`. Fungsi ini menjamin konsistensi fallback chain baik untuk chat user maupun automated cron jobs.
 
 Primary model: `gemini-3.1-flash-lite-preview`
 
@@ -280,7 +293,7 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=<MODAL_URL>/webhook"
 - **Gejala:** `from notion_client import Client` di-import di `main.py`.
 - **Penyebab:** `Client` masih dipakai di `create_notion_task()`, `get_master_routine_config()`, `update_master_routine_config()`.
 - **Solusi:** Refactor fungsi-fungsi ini ke raw `requests`, lalu hapus `notion-client` dari Modal image.
-- **Status:** Teridentifikasi. Belum direfactor.
+- **Status:** ✅ **FIXED** — 2026-05-02. Seluruh codebase telah direfactor menggunakan raw `requests`.
 
 ### 4. Hardcoded Notion token di `update_db_ui.py`
 - **Tanggal:** 2026-05-02
@@ -308,7 +321,7 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=<MODAL_URL>/webhook"
 - **Gejala:** Jika `notion_client.Client()` throw exception (misal auth error), exception **tidak tertangkap**.
 - **Penyebab:** `notion = Client(auth=...)` berada di LUAR blok `try:`.
 - **Solusi:** Refactor `create_notion_task()` ke raw `requests.post` (tidak perlu `Client` sama sekali).
-- **Status:** ✅ **FIXED** — 2026-05-02. `create_notion_task()` sekarang pakai raw requests.
+- **Status:** ✅ **FIXED** — 2026-05-02. `create_notion_task()` dan fungsi lainnya sekarang pakai raw requests.
 
 ### 8. Timezone bug — task dibuat dengan date UTC bukan WIB
 - **Tanggal:** 2026-05-02
@@ -322,4 +335,11 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=<MODAL_URL>/webhook"
 - **Gejala:** Jika `morning_slap` dijalankan manual atau retry, task dari rutinitas dibuat dobel di Notion.
 - **Penyebab:** Tidak ada cek existing task sebelum `create_notion_task()` dipanggil.
 - **Solusi:** Tambah helper `_task_exists_for_date(task_name, date_str)` yang query Notion dengan filter `Name equals` + `Date equals`. Di `morning_slap`, skip task yang sudah ada dan log `[SKIP DEDUP]`.
+- **Status:** ✅ **FIXED** — 2026-05-02.
+
+### 10. Monolithic `main.py` and `test_main.py` maintenance burden
+- **Tanggal:** 2026-05-02
+- **Gejala:** Codebase sulit dimaintain karena semua logic ada di satu file, dan `test_main.py` menjadi sangat besar (500+ baris) serta mudah broken saat ada perubahan struktur.
+- **Penyebab:** Desain awal yang menggabungkan triggers, tools, dan AI agent dalam satu file.
+- **Solusi:** Refactor codebase menjadi modular (`ai_agent.py`, `notion_tools.py`, `cron_jobs.py`, dll) dan split `test_main.py` menjadi specialized test files sesuai modulnya. Centralized AI fallback logic dalam `generate_ai_response`.
 - **Status:** ✅ **FIXED** — 2026-05-02.

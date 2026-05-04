@@ -1,16 +1,23 @@
 import os
+import requests
+import json
 from dotenv import load_dotenv
-from notion_client import Client
 
 load_dotenv()
 
 def setup_notion_db():
-    notion = Client(auth=os.getenv("NOTION_TOKEN"))
+    token = os.getenv("NOTION_TOKEN")
     db_id = os.getenv("NOTION_DB_ID")
+    
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+    }
     
     print("Updating Notion Database Schema...")
     try:
-        # We define the required properties
+        url = f"https://api.notion.com/v1/databases/{db_id}"
         properties = {
             "Name": {"title": {}},
             "Date": {"date": {}},
@@ -21,13 +28,13 @@ def setup_notion_db():
             "🤖 Refleksi AI": {"rich_text": {}}
         }
         
-        response = notion.databases.update(
-            database_id=db_id,
-            properties=properties
-        )
+        resp = requests.patch(url, headers=headers, json={"properties": properties})
+        resp.raise_for_status()
         print("✅ Notion Database Schema updated successfully!")
     except Exception as e:
-        print("❌ Error updating Notion Database:", str(e))
+        print(f"❌ Error updating Notion Database: {e}")
+        if 'resp' in locals():
+            print(f"Response: {resp.text}")
 
 if __name__ == "__main__":
     setup_notion_db()
