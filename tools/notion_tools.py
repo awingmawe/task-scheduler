@@ -581,9 +581,17 @@ def create_notion_database(db_name: str, template_type: str) -> str:
             registry_success = False
             reg_error_msg = str(reg_err)
             print(f"[REGISTRY ERROR] Gagal mencatat DB ke memori: {reg_err}")
+            
+            # ROLLBACK (PR #17): Archive the orphaned database if registry fails
+            try:
+                archive_url = f"https://api.notion.com/v1/pages/{db_id}"
+                requests.patch(archive_url, headers=_notion_headers(), json={"archived": True})
+                print(f"[ROLLBACK] Database '{db_name}' archived because registry update failed.")
+            except Exception as rollback_err:
+                print(f"[ROLLBACK ERROR] Gagal melakukan rollback: {rollback_err}")
 
         if not registry_success:
-            return f"⚠️ Database '{db_name}' ({template_type}) telah dibuat di Notion, tetapi GAGAL disimpan ke Registry AI Memory: {reg_error_msg}. Database ini tidak akan bisa digunakan oleh tool AI lainnya sebelum didaftarkan manual."
+            return f"❌ Gagal: Database '{db_name}' ({template_type}) berhasil dibuat di Notion, tetapi GAGAL disimpan ke Registry AI Memory: {reg_error_msg}. Database telah otomatis di-rollback (dihapus). Silakan coba lagi."
 
         return f"✅ Berhasil! Database '{db_name}' ({template_type}) telah dibuat.\n🔗 Link: {db_url}"
         
