@@ -105,6 +105,8 @@ Ini adalah **Telegram bot** yang terhubung ke **Notion** sebagai database task h
 | `list_google_calendars()` | Lihat daftar kalender yang tersedia |
 | `save_memory(key, value)` | Simpan fakta ke AI memory (persisten di Notion) |
 | `delete_memory(key)` | Hapus fakta dari AI memory |
+| `create_notion_database(db_name, template_type)` | Buat database baru (Finance/Journal/Projects) |
+| `insert_into_dynamic_db(db_name, properties)` | Masukkan data ke database dinamis |
 
 ---
 

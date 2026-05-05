@@ -12,7 +12,9 @@ from tools.notion_tools import (
     create_notion_task,
     add_to_routine,
     remove_from_routine,
-    delete_notion_task
+    delete_notion_task,
+    create_notion_database,
+    insert_into_dynamic_db
 )
 
 class TestNotionTools:
@@ -112,3 +114,87 @@ class TestRoutineManagement:
 
         assert "✅" in result
         assert "sukses" in result.lower()
+
+class TestDynamicDatabase:
+    @patch('tools.notion_tools.requests.post')
+    @patch('tools.notion_tools._check_database_exists')
+    @patch('tools.notion_tools._get_parent_page')
+    @patch('tools.notion_tools.get_memory_config')
+    @patch('tools.notion_tools._update_memory_config')
+    def test_create_notion_database_success(self, mock_upd, mock_mem, mock_parent, mock_exists, mock_post):
+        """Database baru berhasil dibuat dan dicatat di registry."""
+        mock_exists.return_value = False
+        mock_parent.return_value = {"type": "page_id", "page_id": "parent-123"}
+        mock_mem.return_value = ("mem-id", {})
+        
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"id": "db-789", "url": "https://notion.so/db789"}
+        mock_post.return_value = mock_resp
+        
+        result = create_notion_database("My Finance", "Finance")
+        
+        assert "✅" in result
+        assert "db-789" not in result # ID hidden, URL shown
+        assert "https://notion.so/db789" in result
+        mock_upd.assert_called_once()
+
+    @patch('tools.notion_tools._check_database_exists')
+    def test_create_notion_database_duplicate(self, mock_exists):
+        """Gagal jika nama database sudah ada."""
+        mock_exists.return_value = True
+        result = create_notion_database("Existing DB", "Journal")
+        assert "Gagal" in result
+        assert "sudah ada" in result
+
+    def test_create_notion_database_invalid_template(self):
+        """Gagal jika template tidak dikenal."""
+        result = create_notion_database("Wrong", "Unknown")
+        assert "tidak tersedia" in result
+
+    @patch('tools.notion_tools.get_memory_config')
+    @patch('tools.notion_tools.requests.post')
+    def test_insert_into_dynamic_db_success(self, mock_post, mock_mem):
+        """Berhasil memasukkan record ke database dinamis."""
+        mock_mem.return_value = ("mem-id", {
+            "_DATABASE_REGISTRY": {
+                "My Finance": {"id": "db-123", "template": "Finance"}
+            }
+        })
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_post.return_value = mock_resp
+        
+        result = insert_into_dynamic_db("My Finance", {"Name": {"title": [{"text": {"content": "Buy Coffee"}}]}})
+        assert "✅" in result
+        assert "berhasil" in result.lower()
+    @patch('tools.notion_tools.requests.post')
+    @patch('tools.notion_tools.requests.patch')
+    @patch('tools.notion_tools._check_database_exists')
+    @patch('tools.notion_tools._get_parent_page')
+    @patch('tools.notion_tools.get_memory_config')
+    def test_create_notion_database_registry_failure_rollback(self, mock_mem, mock_parent, mock_exists, mock_patch, mock_post):
+        """Gagal registry -> Rollback (archive) database."""
+        mock_exists.return_value = False
+        mock_parent.return_value = {"type": "page_id", "page_id": "parent-123"}
+        mock_mem.side_effect = Exception("Registry error")
+        
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"id": "db-fail", "url": "https://notion.so/dbfail"}
+        mock_post.return_value = mock_resp
+        
+        # Patch for archive call
+        mock_archive_resp = MagicMock()
+        mock_archive_resp.status_code = 200
+        mock_patch.return_value = mock_archive_resp
+        
+        result = create_notion_database("Fail DB", "Finance")
+        
+        assert "❌ Gagal" in result
+        assert "telah otomatis di-rollback" in result
+        # Verify patch (archive) was called
+        mock_patch.assert_called_once()
+        args, kwargs = mock_patch.call_args
+        assert "db-fail" in args[0]
+        assert kwargs["json"]["archived"] is True

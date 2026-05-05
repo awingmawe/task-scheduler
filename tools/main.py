@@ -35,7 +35,19 @@ def _process_and_reply_sync(chat_id: int, user_text: str, audio_data: dict | Non
     """Sync background task: proses AI dan kirim balik ke Telegram."""
     try:
         ai_reply = process_with_ai(user_text, audio_data)
-        send_telegram_message(ai_reply, chat_id)
+        
+        # BONUS: Tampilkan keyboard pilihan template jika AI sedang menawarkan
+        reply_markup = None
+        if "template" in ai_reply.lower() and ("pilih" in ai_reply.lower() or "tersedia" in ai_reply.lower()):
+            reply_markup = {
+                "keyboard": [
+                    [{"text": "Finance"}, {"text": "Journal"}, {"text": "Projects"}]
+                ],
+                "one_time_keyboard": True,
+                "resize_keyboard": True
+            }
+            
+        send_telegram_message(ai_reply, chat_id, reply_markup=reply_markup)
     except Exception as e:
         print(f"Background processing error: {e}")
         send_telegram_message("Ada masalah internal, coba lagi ya!", chat_id)
