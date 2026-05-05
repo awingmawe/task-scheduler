@@ -565,6 +565,8 @@ def create_notion_database(db_name: str, template_type: str) -> str:
         db_url = res_json.get("url")
 
         # 5. Simpan ke Registry (AI MEMORY)
+        registry_success = True
+        reg_error_msg = ""
         try:
             page_id, memory = get_memory_config(skip_cache=True)
             registry = memory.get("_DATABASE_REGISTRY", {})
@@ -576,7 +578,12 @@ def create_notion_database(db_name: str, template_type: str) -> str:
             memory["_DATABASE_REGISTRY"] = registry
             _update_memory_config(page_id, memory)
         except Exception as reg_err:
+            registry_success = False
+            reg_error_msg = str(reg_err)
             print(f"[REGISTRY ERROR] Gagal mencatat DB ke memori: {reg_err}")
+
+        if not registry_success:
+            return f"⚠️ Database '{db_name}' ({template_type}) telah dibuat di Notion, tetapi GAGAL disimpan ke Registry AI Memory: {reg_error_msg}. Database ini tidak akan bisa digunakan oleh tool AI lainnya sebelum didaftarkan manual."
 
         return f"✅ Berhasil! Database '{db_name}' ({template_type}) telah dibuat.\n🔗 Link: {db_url}"
         
