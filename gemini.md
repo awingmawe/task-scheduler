@@ -284,6 +284,7 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=<MODAL_URL>/webhook"
 3. **Test dulu sebelum push:** Jalankan `pytest tests/` dan pastikan semua pass.
 4. **Data-First:** Jangan mulai coding fitur baru sebelum shape payload-nya dikonfirmasi.
 5. **Powershell syntax:** Di Windows, gunakan `;` bukan `&&` untuk chain commands di terminal.
+6. **Git Branching & Sync:** Setiap kali mengerjakan issue di GitHub, WAJIB buat branch baru dari `main` dengan nama branch sesuai nama issue. Selalu jalankan `git fetch origin` sebelum melakukan `git pull`.
 
 ---
 
