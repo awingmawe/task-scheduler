@@ -5,6 +5,56 @@ import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from config import _notion_headers, _today_wib
 from gcal_tools import create_google_calendar_event
+from memory_tools import get_memory_config, _update_memory_config
+
+# --- DATABASE TEMPLATES ---
+DB_TEMPLATES = {
+    "Finance": {
+        "properties": {
+            "Name": {"title": {}},
+            "Amount": {"number": {"format": "number"}},
+            "Date": {"date": {}},
+            "Category": {"select": {"options": [
+                {"name": "Food", "color": "orange"},
+                {"name": "Transport", "color": "blue"},
+                {"name": "Entertainment", "color": "purple"},
+                {"name": "Shopping", "color": "pink"},
+                {"name": "Others", "color": "gray"}
+            ]}},
+            "Type": {"select": {"options": [
+                {"name": "Income", "color": "green"},
+                {"name": "Expense", "color": "red"}
+            ]}},
+            "Receipt": {"files": {}}
+        }
+    },
+    "Journal": {
+        "properties": {
+            "Name": {"title": {}},
+            "Date": {"date": {}},
+            "Mood": {"select": {"options": [
+                {"name": "Happy", "color": "yellow"},
+                {"name": "Neutral", "color": "gray"},
+                {"name": "Sad", "color": "blue"},
+                {"name": "Productive", "color": "green"},
+                {"name": "Tired", "color": "purple"}
+            ]}},
+            "Entry": {"rich_text": {}}
+        }
+    },
+    "Projects": {
+        "properties": {
+            "Name": {"title": {}},
+            "Status": {"status": {}},
+            "Deadline": {"date": {}},
+            "Priority": {"select": {"options": [
+                {"name": "High", "color": "red"},
+                {"name": "Medium", "color": "orange"},
+                {"name": "Low", "color": "blue"}
+            ]}}
+        }
+    }
+}
 
 def _task_exists_for_date(task_name: str, date_str: str) -> bool:
     """Cek apakah task dengan nama persis sudah ada di Notion untuk tanggal tertentu."""
@@ -412,3 +462,130 @@ def remove_from_routine(task_name: str) -> str:
         return f"✅ Sukses menghapus '{task_name}' dari rutinitas harian."
     except Exception as e:
         return f"Gagal menghapus rutinitas: {str(e)}"
+
+# --- DYNAMIC DATABASE TOOLS (Issue #15 & #16) ---
+
+def _get_parent_page() -> dict:
+    """Ambil parent page ID dari database utama (NOTION_DB_ID)."""
+    db_id = os.environ["NOTION_DB_ID"]
+    url = f"https://api.notion.com/v1/databases/{db_id}"
+    try:
+        resp = requests.get(url, headers=_notion_headers())
+        resp.raise_for_status()
+        return resp.json().get("parent", {})
+    except Exception as e:
+        print(f"[ERROR] _get_parent_page: {e}")
+        return {}
+
+def _check_database_exists(db_name: str) -> bool:
+    """Cek apakah database dengan nama tersebut sudah ada di workspace."""
+    url = "https://api.notion.com/v1/search"
+    payload = {
+        "query": db_name,
+        "filter": {"property": "object", "value": "database"}
+    }
+    try:
+        resp = requests.post(url, headers=_notion_headers(), json=payload)
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
+        for res in results:
+            # Bandingkan title (array of text objects)
+            titles = res.get("title", [])
+            if titles:
+                actual_name = titles[0].get("plain_text", "")
+                if actual_name.lower() == db_name.lower():
+                    return True
+        return False
+    except Exception as e:
+        print(f"[ERROR] _check_database_exists: {e}")
+        return False
+
+def create_notion_database(db_name: str, template_type: str) -> str:
+    """
+    Buat database baru di Notion berdasarkan template.
+    HANYA dijalankan setelah konfirmasi user.
+    """
+    if template_type not in DB_TEMPLATES:
+        return f"Gagal: Template '{template_type}' tidak tersedia. Pilih: Finance, Journal, atau Projects."
+
+    # 1. Cek Duplikasi
+    if _check_database_exists(db_name):
+        return f"Gagal: Database dengan nama '{db_name}' sudah ada di Notion. Coba nama lain."
+
+    # 2. Dapatkan Parent
+    parent = _get_parent_page()
+    if not parent:
+        return "Gagal: Tidak bisa menemukan Parent Page untuk membuat database baru."
+
+    # 3. Susun Payload
+    template = DB_TEMPLATES[template_type]
+    payload = {
+        "parent": parent,
+        "title": [{"type": "text", "text": {"content": db_name}}],
+        "properties": template["properties"]
+    }
+
+    # 4. Hit API
+    try:
+        url = "https://api.notion.com/v1/databases"
+        resp = requests.post(url, headers=_notion_headers(), json=payload)
+        
+        if resp.status_code != 200:
+            return f"❌ Gagal membuat database ({resp.status_code}): {resp.text}"
+            
+        res_json = resp.json()
+        db_id = res_json.get("id")
+        db_url = res_json.get("url")
+
+        # 5. Simpan ke Registry (AI MEMORY)
+        try:
+            page_id, memory = get_memory_config(skip_cache=True)
+            registry = memory.get("_DATABASE_REGISTRY", {})
+            registry[db_name] = {
+                "id": db_id,
+                "template": template_type,
+                "created_at": _today_wib()
+            }
+            memory["_DATABASE_REGISTRY"] = registry
+            _update_memory_config(page_id, memory)
+        except Exception as reg_err:
+            print(f"[REGISTRY ERROR] Gagal mencatat DB ke memori: {reg_err}")
+
+        return f"✅ Berhasil! Database '{db_name}' ({template_type}) telah dibuat.\n🔗 Link: {db_url}"
+        
+    except Exception as e:
+        return f"Gagal membuat database: {str(e)}"
+
+def insert_into_dynamic_db(db_name: str, properties: dict) -> str:
+    """
+    Masukkan data ke database dinamis yang sudah pernah dibuat.
+    Properties harus sesuai dengan schema template-nya.
+    """
+    try:
+        _, memory = get_memory_config()
+        registry = memory.get("_DATABASE_REGISTRY", {})
+        
+        db_info = None
+        for name, info in registry.items():
+            if name.lower() == db_name.lower():
+                db_info = info
+                break
+        
+        if not db_info:
+            return f"Database '{db_name}' tidak ditemukan di Registry AI. Silakan buat dulu pakai 'create_notion_database'."
+
+        db_id = db_info["id"]
+        url = "https://api.notion.com/v1/pages"
+        payload = {
+            "parent": {"database_id": db_id},
+            "properties": properties
+        }
+        
+        resp = requests.post(url, headers=_notion_headers(), json=payload)
+        if resp.status_code == 200:
+            return f"✅ Data berhasil dimasukkan ke '{db_name}'."
+        else:
+            return f"❌ Gagal masukkan data ke '{db_name}': {resp.text}"
+            
+    except Exception as e:
+        return f"Error insert dynamic db: {str(e)}"

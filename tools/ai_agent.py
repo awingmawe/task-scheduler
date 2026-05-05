@@ -10,7 +10,9 @@ from notion_tools import (
     create_notion_task,
     delete_notion_task,
     add_to_routine,
-    remove_from_routine
+    remove_from_routine,
+    create_notion_database,
+    insert_into_dynamic_db
 )
 from gcal_tools import create_google_calendar_event, list_google_calendars
 from telegram_tools import send_telegram_message
@@ -114,6 +116,16 @@ def process_with_ai(user_input: str, audio_data: dict = None) -> str:
         "Jika user sebut JAM AKHIR (contoh: 'sampai jam 17'), WAJIB isi end_time (format HH:MM).\n"
         "Gunakan 'save_memory' jika user minta INGAT sesuatu tentang dirinya.\n"
         "Gunakan 'delete_memory' jika user minta LUPA/HAPUS dari ingatan.\n"
+        "--- FITUR DYNAMIC DATABASE ---\n"
+        "1. Tawarkan bantuan buat database baru jika user ingin mengelola data khusus (Finance, Journal, Projects).\n"
+        "2. Gunakan 'create_notion_database' HANYA SETELAH user memberikan konfirmasi eksplisit (Contoh: 'Ya, buatkan').\n"
+        "3. Tawarkan pilihan template yang tersedia: Finance, Journal, atau Projects. Jangan buat template lain.\n"
+        "   - Finance: Name, Amount (number), Date, Category (select), Type (Income/Expense), Receipt (file).\n"
+        "   - Journal: Name, Date, Mood (Happy/Neutral/Sad/Productive/Tired), Entry (text).\n"
+        "   - Projects: Name, Status, Deadline, Priority (High/Medium/Low).\n"
+        "4. Pastikan nama database belum ada di ingatan/registry.\n"
+        "5. Gunakan 'insert_into_dynamic_db' untuk memasukkan record ke database yang sudah dibuat tersebut.\n"
+        "-------------------------------\n"
         "Jika ada voice note, transkripsikan dulu baru jalankan instruksinya.\n"
         "Jawab singkat, asik, pakai emoji, jangan kaku."
         f"{memory_context}"
@@ -124,7 +136,8 @@ def process_with_ai(user_input: str, audio_data: dict = None) -> str:
         create_google_calendar_event, list_google_calendars,
         get_daily_report, get_weekly_report, get_monthly_report,
         add_to_routine, remove_from_routine,
-        save_memory, delete_memory
+        save_memory, delete_memory,
+        create_notion_database, insert_into_dynamic_db
     ]
 
     contents = []
