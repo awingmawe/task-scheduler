@@ -472,29 +472,53 @@ def _get_parent_page() -> dict:
     try:
         resp = requests.get(url, headers=_notion_headers())
         resp.raise_for_status()
-        return resp.json().get("parent", {})
+        parent = resp.json().get("parent", {})
+        
+        # FIX (PR #17): Notion API prohibits creating a DB with a workspace parent.
+        if parent.get("type") == "workspace":
+            print("[WARN] Parent is workspace. Notion API prohibits direct DB creation under workspace.")
+            # Fallback to a secondary env var if available, else return error info
+            parent_page_id = os.environ.get("PARENT_PAGE_ID")
+            if parent_page_id:
+                return {"type": "page_id", "page_id": parent_page_id}
+            return {"error": "workspace_parent_not_supported"}
+            
+        return parent
     except Exception as e:
         print(f"[ERROR] _get_parent_page: {e}")
         return {}
 
 def _check_database_exists(db_name: str) -> bool:
-    """Cek apakah database dengan nama tersebut sudah ada di workspace."""
+    """Cek apakah database dengan nama tersebut sudah ada di workspace (with pagination)."""
     url = "https://api.notion.com/v1/search"
-    payload = {
-        "query": db_name,
-        "filter": {"property": "object", "value": "database"}
-    }
+    has_more = True
+    next_cursor = None
+    
     try:
-        resp = requests.post(url, headers=_notion_headers(), json=payload)
-        resp.raise_for_status()
-        results = resp.json().get("results", [])
-        for res in results:
-            # Bandingkan title (array of text objects)
-            titles = res.get("title", [])
-            if titles:
-                actual_name = titles[0].get("plain_text", "")
-                if actual_name.lower() == db_name.lower():
-                    return True
+        while has_more:
+            payload = {
+                "query": db_name,
+                "filter": {"property": "object", "value": "database"},
+                "page_size": 100
+            }
+            if next_cursor:
+                payload["start_cursor"] = next_cursor
+                
+            resp = requests.post(url, headers=_notion_headers(), json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            
+            results = data.get("results", [])
+            for res in results:
+                titles = res.get("title", [])
+                if titles:
+                    actual_name = titles[0].get("plain_text", "")
+                    if actual_name.lower() == db_name.lower():
+                        return True
+            
+            has_more = data.get("has_more", False)
+            next_cursor = data.get("next_cursor")
+            
         return False
     except Exception as e:
         print(f"[ERROR] _check_database_exists: {e}")
@@ -516,6 +540,9 @@ def create_notion_database(db_name: str, template_type: str) -> str:
     parent = _get_parent_page()
     if not parent:
         return "Gagal: Tidak bisa menemukan Parent Page untuk membuat database baru."
+    
+    if parent.get("error") == "workspace_parent_not_supported":
+        return "❌ Gagal: Database utama Anda berada di level 'Workspace'. Notion API tidak mengizinkan pembuatan database baru langsung di bawah Workspace. Silakan tentukan 'PARENT_PAGE_ID' di environment variables atau pindahkan database utama ke dalam sebuah Page."
 
     # 3. Susun Payload
     template = DB_TEMPLATES[template_type]
@@ -585,7 +612,13 @@ def insert_into_dynamic_db(db_name: str, properties: dict) -> str:
         if resp.status_code == 200:
             return f"✅ Data berhasil dimasukkan ke '{db_name}'."
         else:
-            return f"❌ Gagal masukkan data ke '{db_name}': {resp.text}"
+            # FIX (PR #17): Return a more user-friendly error message from Notion API
+            try:
+                error_data = resp.json()
+                error_msg = error_data.get("message", resp.text)
+                return f"❌ Gagal masukkan data ke '{db_name}': {error_msg}"
+            except:
+                return f"❌ Gagal masukkan data ke '{db_name}': {resp.text}"
             
     except Exception as e:
         return f"Error insert dynamic db: {str(e)}"
